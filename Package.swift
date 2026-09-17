@@ -3,6 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "Hazmat",
+    platforms: [.macOS(.v15)],
     products: [
         .library(name: "HazmatCore", targets: ["HazmatCore"])
     ],

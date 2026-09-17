@@ -139,3 +139,8 @@ extension Composition {
         resolved.filter { $0.name == name }.count
     }
 }
+
+/// The module-qualified name, so a type with a `snapshot()` method can reach it.
+func currentSnapshot(of url: URL) throws -> FileSnapshot {
+    try snapshot(of: url)
+}
