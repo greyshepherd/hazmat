@@ -1,0 +1,127 @@
+# Spec Delta
+
+## Purpose
+
+Holds the fragments and profiles Hazmat edits: where they live, how they are laid
+out, and what an authoring operation guarantees when it writes.
+
+## ADDED Requirements
+
+### Requirement: The store has a fixed location and layout
+
+The store MUST live in the user's application support directory under
+`Hazmat/store` unless the environment names another root, MUST hold fragments in
+`fragments/` and profiles in `profiles/`, and MUST hold one fragment per
+`<name>.hosts` and one profile per `<name>.profile`. The environment override
+MUST be honoured so a development or test store can be kept apart from the real
+one.
+
+#### Scenario: Default location
+- **WHEN** a store is opened with nothing in the environment naming a root
+- **THEN** its root is the application support directory and its fragments and profiles are read from `fragments/` and `profiles/`
+
+#### Scenario: Overridden location
+- **WHEN** the environment names a root
+- **THEN** every read and write goes to that root and the default store is left alone
+
+### Requirement: Names are validated before anything is written
+
+A profile or fragment name MUST start with a letter or a digit, MUST contain only
+letters, digits, `.`, `_`, and `-`, and MUST NOT contain `..`. A name outside
+that grammar MUST be refused with a reason, and no file or directory MAY be
+created, replaced, or removed for it.
+
+#### Scenario: A name that would leave the store
+- **WHEN** a name containing a path separator or `..` is used
+- **THEN** the operation is refused with a reason and the store is unchanged
+
+#### Scenario: A refused name leaves nothing behind
+- **WHEN** an operation is refused for its name
+- **THEN** no new file and no temporary file is left in the store
+
+### Requirement: The store is created on demand and needs no privilege
+
+Creating a profile, a fragment, or the directories that hold them MUST succeed for
+an ordinary user, MUST NOT ask for privileged access, and MUST NOT modify the live
+hosts file. A store that does not exist yet MUST be creatable through the same
+authoring operations that fill it.
+
+#### Scenario: First file in a store that does not exist
+- **WHEN** a fragment or profile is created and the store's directories do not exist
+- **THEN** they are created and the file exists with the text that was written
+
+#### Scenario: Authoring needs no privilege
+- **WHEN** authoring runs as an ordinary user
+- **THEN** it succeeds and the live hosts file's bytes and modification time are unchanged
+
+### Requirement: An authoring operation either completes or leaves the previous text in place
+
+Writing a fragment or a profile MUST replace the file atomically, so a write that
+fails leaves the previous text readable and no partial file visible. A failure
+MUST be reported with its reason.
+
+#### Scenario: Interrupted write
+- **WHEN** a write fails
+- **THEN** the previous text is still readable and no temporary file remains
+
+#### Scenario: A reader during a write
+- **WHEN** the file is read while it is being replaced
+- **THEN** the read returns one complete version of the text
+
+### Requirement: Saving unchanged text does not rewrite the file
+
+Saving text identical to what the file already holds MUST leave the file's bytes
+and modification time unchanged, and MUST be reported as nothing to do.
+
+#### Scenario: The same text saved twice
+- **WHEN** the same text is saved twice
+- **THEN** the second save reports nothing to change and the modification time does not advance
+
+### Requirement: Profiles and fragments can be created, renamed, and deleted
+
+The store MUST support creating, renaming, duplicating, and deleting a profile or
+a fragment. A rename MUST be refused when the target name already exists, and
+MUST leave the target's text untouched. Deleting a name the store does not hold
+MUST be reported as nothing to do rather than as a failure.
+
+#### Scenario: Rename keeps the text
+- **WHEN** a fragment is renamed
+- **THEN** the new name holds the same text and the old name is gone
+
+#### Scenario: Rename onto an existing name
+- **WHEN** a rename targets a name the store already holds
+- **THEN** the rename is refused and both files keep the text they had
+
+#### Scenario: Deleting something the store does not hold
+- **WHEN** a profile that does not exist is deleted
+- **THEN** the outcome reports that nothing was deleted
+
+### Requirement: Deleting a referenced fragment or the applied profile is permitted and reported
+
+Deleting a fragment that a profile references MUST be permitted, and composing
+that profile MUST report the missing fragment rather than failing the delete or
+contributing partial entries. Deleting the profile whose block is live MUST leave
+the live file untouched, and the block it leaves behind MUST be reported as
+drift.
+
+#### Scenario: Fragment deleted while referenced
+- **WHEN** a fragment that a profile references is deleted
+- **THEN** the delete succeeds and composing that profile reports the missing fragment
+
+#### Scenario: The applied profile is deleted
+- **WHEN** the profile matching the live block is deleted
+- **THEN** the live file's bytes are unchanged and the block is reported as drift
+
+### Requirement: Listing reflects the directory and has one order
+
+Listing the store's profiles or fragments MUST reflect the directory's contents
+at the time it is asked, MUST NOT come from a cached list, and MUST return the
+same order for the same contents.
+
+#### Scenario: A file added by another tool
+- **WHEN** a fragment file is created outside the application and the store is listed again
+- **THEN** the new fragment appears
+
+#### Scenario: Two listings of the same directory
+- **WHEN** the same directory is listed twice with no change
+- **THEN** both listings hold the same names in the same order
