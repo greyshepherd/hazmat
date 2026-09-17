@@ -6,15 +6,21 @@ let package = Package(
     platforms: [.macOS(.v15)],
     products: [
         .library(name: "HazmatCore", targets: ["HazmatCore"]),
+        .executable(name: "HazmatApp", targets: ["HazmatApp"]),
         .executable(name: "HazmatDaemon", targets: ["HazmatDaemon"])
     ],
     targets: [
         .target(name: "HazmatCore"),
         .target(name: "HazmatProtocol"),
         .target(name: "HazmatPrivileged", dependencies: ["HazmatCore", "HazmatProtocol"]),
+        .target(name: "HazmatAppSupport", dependencies: ["HazmatCore", "HazmatProtocol"]),
         .executableTarget(
             name: "HazmatDaemon",
             dependencies: ["HazmatCore", "HazmatPrivileged", "HazmatProtocol"]
+        ),
+        .executableTarget(
+            name: "HazmatApp",
+            dependencies: ["HazmatCore", "HazmatAppSupport", "HazmatProtocol"]
         ),
         .testTarget(
             name: "HazmatCoreTests",
@@ -24,6 +30,10 @@ let package = Package(
         .testTarget(
             name: "HazmatPrivilegedTests",
             dependencies: ["HazmatCore", "HazmatPrivileged", "HazmatProtocol"]
+        ),
+        .testTarget(
+            name: "HazmatAppSupportTests",
+            dependencies: ["HazmatCore", "HazmatAppSupport", "HazmatProtocol"]
         )
     ]
 )
