@@ -14,6 +14,7 @@ public struct MenuPresentation: Equatable, Sendable {
         case overwriteDrift(ProfileID, liveBlock: Data)
         case turnOff
         case registerHelper
+        case checkForUpdates
     }
 
     public struct Item: Equatable, Sendable, Identifiable {
@@ -34,12 +35,20 @@ public struct MenuPresentation: Equatable, Sendable {
     public let statusTitle: String
     public let sections: [Section]
 
-    public init(reading: ActiveProfileReading, helper: HelperState, notice: String) {
+    public init(
+        reading: ActiveProfileReading,
+        helper: HelperState,
+        notice: String,
+        update: UpdateAvailability = .unavailable
+    ) {
         var items = ItemBuilder()
 
         var status: [Item] = [items.line(helper.summary)]
         if !notice.isEmpty {
             status.append(items.line(notice))
+        }
+        if case .failed(let reason) = update {
+            status.append(items.line("Could not check for updates: \(reason)"))
         }
         if let activation = reading.activation {
             for problem in activation.problems {
@@ -98,6 +107,11 @@ public struct MenuPresentation: Equatable, Sendable {
         if !helper.canWrite {
             sections.append(
                 Section(id: "helper", items: [items.item("Register Helper", .registerHelper)])
+            )
+        }
+        if update != .unavailable {
+            sections.append(
+                Section(id: "updates", items: [items.item("Check for Updates…", .checkForUpdates)])
             )
         }
 

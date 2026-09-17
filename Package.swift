@@ -9,6 +9,9 @@ let package = Package(
         .executable(name: "HazmatApp", targets: ["HazmatApp"]),
         .executable(name: "HazmatDaemon", targets: ["HazmatDaemon"])
     ],
+    dependencies: [
+        .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.10.0")
+    ],
     targets: [
         .target(name: "HazmatCore"),
         .target(name: "HazmatProtocol"),
@@ -20,7 +23,12 @@ let package = Package(
         ),
         .executableTarget(
             name: "HazmatApp",
-            dependencies: ["HazmatCore", "HazmatAppSupport", "HazmatProtocol"]
+            dependencies: [
+                "HazmatCore",
+                "HazmatAppSupport",
+                "HazmatProtocol",
+                .product(name: "Sparkle", package: "Sparkle")
+            ]
         ),
         .testTarget(
             name: "HazmatCoreTests",
@@ -34,6 +42,10 @@ let package = Package(
         .testTarget(
             name: "HazmatAppSupportTests",
             dependencies: ["HazmatCore", "HazmatAppSupport", "HazmatProtocol"]
+        ),
+        .testTarget(
+            name: "HazmatPackagingTests",
+            dependencies: ["HazmatProtocol"]
         )
     ]
 )

@@ -1,4 +1,5 @@
 import Foundation
+import HazmatProtocol
 import Security
 
 public enum SignatureError: Error, Equatable, Sendable, CustomStringConvertible {
@@ -27,6 +28,38 @@ public struct SignatureVerifier: Sendable {
 
     public static func development(appIdentifier: String) -> SignatureVerifier {
         SignatureVerifier(requirement: "identifier \"\(appIdentifier)\"")
+    }
+
+    /// The requirement for the build that is actually running. A distribution
+    /// build carries a team in its own signature, and then the team is part of
+    /// what a client must satisfy, so an ad-hoc build of the same identifier
+    /// cannot write. A development build carries no team, and there is nothing to
+    /// anchor but the identifier. Deriving it from the running binary means the
+    /// rule cannot disagree with how that binary was signed.
+    public static func forOwnBundle(appIdentifier: String = HazmatIdentity.bundleIdentifier) -> SignatureVerifier {
+        guard let teamIdentifier = ownTeamIdentifier() else {
+            return .development(appIdentifier: appIdentifier)
+        }
+        return .shipping(appIdentifier: appIdentifier, teamIdentifier: teamIdentifier)
+    }
+
+    /// The team the running process was signed with, or nothing when it was
+    /// signed ad-hoc.
+    private static func ownTeamIdentifier() -> String? {
+        var code: SecCode?
+        guard SecCodeCopySelf([], &code) == errSecSuccess, let code else { return nil }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess, let staticCode else { return nil }
+        var information: CFDictionary?
+        let flags = SecCSFlags(rawValue: kSecCSSigningInformation)
+        guard SecCodeCopySigningInformation(staticCode, flags, &information) == errSecSuccess,
+              let signed = information as? [String: Any],
+              let team = signed[kSecCodeInfoTeamIdentifier as String] as? String,
+              !team.isEmpty
+        else {
+            return nil
+        }
+        return team
     }
 
     public static func shipping(appIdentifier: String, teamIdentifier: String) -> SignatureVerifier {

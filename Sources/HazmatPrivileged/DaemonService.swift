@@ -65,14 +65,19 @@ public final class DaemonListenerDelegate: NSObject, NSXPCListenerDelegate, @unc
     private let handler: DaemonWriteHandler
     private let verifier: ConnectionVerifying
     private let logger: Logger
+    /// Nothing keeps the daemon alive between requests when this is set, so the
+    /// build on disk is the one that serves the next request.
+    private let idleExit: IdleExit?
 
     public init(
         handler: DaemonWriteHandler,
         verifier: ConnectionVerifying,
+        idleExit: IdleExit? = nil,
         logger: Logger = Logger(subsystem: HazmatIdentity.bundleIdentifier, category: "daemon")
     ) {
         self.handler = handler
         self.verifier = verifier
+        self.idleExit = idleExit
         self.logger = logger
     }
 
@@ -82,9 +87,33 @@ public final class DaemonListenerDelegate: NSObject, NSXPCListenerDelegate, @unc
             logger.error("refused a connection from process \(processIdentifier): it does not satisfy the daemon's code requirement")
             return false
         }
+        idleExit?.connectionOpened()
+        // Interruption and invalidation can both arrive for one connection, and
+        // either way the client is gone.
+        let gone = Once()
+        connection.invalidationHandler = { [idleExit] in
+            if gone.claim() { idleExit?.connectionClosed() }
+        }
+        connection.interruptionHandler = { [idleExit] in
+            if gone.claim() { idleExit?.connectionClosed() }
+        }
         connection.exportedInterface = NSXPCInterface(with: HazmatDaemonXPC.self)
         connection.exportedObject = DaemonService(handler: handler)
         connection.resume()
+        return true
+    }
+}
+
+/// Whether the first of two callbacks has already been taken.
+private final class Once: @unchecked Sendable {
+    private let lock = NSLock()
+    private var claimed = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        if claimed { return false }
+        claimed = true
         return true
     }
 }

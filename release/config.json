@@ -1,0 +1,11 @@
+{
+  "shortVersion": "1.0.0",
+  "buildNumber": 1,
+  "teamIdentifier": "BHY3LCR536",
+  "update": {
+    "feedURL": "https://updates.greyshepherd.com/appcast.xml",
+    "publicKey": "",
+    "bucket": "hazmat-updates",
+    "assetPrefix": "releases"
+  }
+}

@@ -2,7 +2,7 @@ import SwiftUI
 
 @main
 struct HazmatApp: App {
-    @State private var model = ShellModel()
+    @State private var model = ShellModel(updates: UpdateChecker())
 
     var body: some Scene {
         WindowGroup("Hazmat") {
@@ -13,7 +13,7 @@ struct HazmatApp: App {
         MenuBarExtra {
             StatusMenu(model: model)
         } label: {
-            Text(model.menu.statusTitle)
+            StatusLabel(title: model.menu.statusTitle)
         }
         .menuBarExtraStyle(.menu)
     }

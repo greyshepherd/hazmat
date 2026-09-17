@@ -36,13 +36,54 @@ final class MenuPresentationTests: XCTestCase {
         actions(menu).filter { action in
             switch action {
             case .activate, .overwriteDrift: return true
-            case .turnOff, .registerHelper: return false
+            case .turnOff, .registerHelper, .checkForUpdates: return false
             }
         }
     }
 
     private func lines(_ menu: MenuPresentation) -> [String] {
         menu.sections.flatMap(\.items).filter { !$0.isSelectable }.map(\.title)
+    }
+
+    // MARK: - 4.2 The update check the bundle can offer
+
+    func testTheUpdateCheckIsOfferedWhenTheBundleCanCheck() throws {
+        let menu = MenuPresentation(
+            reading: derived([work], .active([work])),
+            helper: .enabled,
+            notice: "",
+            update: .available
+        )
+
+        XCTAssertEqual(titles(menu, "updates"), ["Check for Updates…"])
+        XCTAssertEqual(try XCTUnwrap(menuItem(menu, titled: "Check for Updates…")).action, .checkForUpdates)
+        XCTAssertTrue(lines(menu).filter { $0.contains("update") }.isEmpty, lines(menu).description)
+    }
+
+    func testTheUpdateCheckIsNotOfferedWhenTheBundleCannotCheck() {
+        let menu = MenuPresentation(
+            reading: derived([work], .active([work])),
+            helper: .enabled,
+            notice: ""
+        )
+
+        XCTAssertNil(section(menu, "updates"), menu.sections.map(\.id).description)
+        XCTAssertFalse(actions(menu).contains(.checkForUpdates), actions(menu).description)
+    }
+
+    func testAFailedUpdateCheckIsReportedWithItsReason() {
+        let menu = MenuPresentation(
+            reading: derived([work], .active([work])),
+            helper: .enabled,
+            notice: "",
+            update: .failed("the feed could not be reached")
+        )
+
+        XCTAssertTrue(
+            lines(menu).contains { $0.contains("the feed could not be reached") },
+            lines(menu).description
+        )
+        XCTAssertNotNil(menuItem(menu, titled: "Check for Updates…"), "a failed check must still be retryable")
     }
 
     // MARK: - 3.2 Items and labels for every state

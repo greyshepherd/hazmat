@@ -15,6 +15,7 @@ final class ShellModel {
     private(set) var notice = ""
     private(set) var busy = false
     private(set) var reading: ActiveProfileReading = .missingStore
+    private(set) var updateAvailability: UpdateAvailability = .unavailable
     private(set) var editor: EditorPresentation
     var selectedProfile: ProfileID?
     var selectedFragment: FragmentID?
@@ -24,11 +25,13 @@ final class ShellModel {
     private let applier: HostsFileApplier
     private let liveFile: LiveHostsFile
     private let editorModel: EditorModel
+    private let updates: (any UpdateChecking)?
 
     init(
         storeRoot: URL = StoreLocation.defaultRoot,
         fileURL: URL = DaemonTarget.hostsFile,
-        writer: PrivilegedWriter? = nil
+        writer: PrivilegedWriter? = nil,
+        updates: (any UpdateChecking)? = nil
     ) {
         let editorModel = EditorModel(storeRoot: storeRoot, fileURL: fileURL, writer: writer ?? DaemonClient())
         registration = HelperRegistration()
@@ -36,13 +39,21 @@ final class ShellModel {
         applier = HostsFileApplier(fileURL: fileURL, writer: writer ?? DaemonClient())
         liveFile = LiveHostsFile(url: fileURL)
         self.editorModel = editorModel
+        self.updates = updates
+        updateAvailability = updates?.availability ?? .unavailable
         editor = editorModel.read()
     }
 
     /// The menu bar item, derived from the last refresh. Presentation only: the
     /// items come from app support.
     var menu: MenuPresentation {
-        MenuPresentation(reading: reading, helper: helper, notice: notice)
+        MenuPresentation(reading: reading, helper: helper, notice: notice, update: updateAvailability)
+    }
+
+    /// The check the menu offers. The framework reports its own progress and
+    /// outcome; this only asks for one.
+    func checkForUpdates() {
+        updates?.checkForUpdates()
     }
 
     /// What the live file holds, for the window to name alongside the editor.
@@ -83,6 +94,10 @@ final class ShellModel {
             let fallback = profiles.first
             if fallback != selectedProfile { selectedProfile = fallback }
         }
+
+        let latestUpdate = updates?.availability ?? .unavailable
+        if latestUpdate != updateAvailability { updateAvailability = latestUpdate }
+
         refreshEditor()
     }
 

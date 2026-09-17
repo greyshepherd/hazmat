@@ -17,39 +17,47 @@ public final class DaemonClient: PrivilegedWriter, @unchecked Sendable {
     }
 
     public func write(bytes: Data, baseline: Data) -> PrivilegedWriteResult {
-        call { proxy, reply in
-            proxy.writeFileBytes(bytes, baselineDigest: BaselineDigest.of(baseline), withReply: reply)
+        answer {
+            call { proxy, reply in
+                proxy.writeFileBytes(bytes, baselineDigest: BaselineDigest.of(baseline), withReply: reply)
+            }
         }
     }
 
     public func removeBlock(baseline: Data) -> PrivilegedWriteResult {
-        call { proxy, reply in
-            proxy.removeManagedBlock(BaselineDigest.of(baseline), withReply: reply)
+        answer {
+            call { proxy, reply in
+                proxy.removeManagedBlock(BaselineDigest.of(baseline), withReply: reply)
+            }
         }
     }
 
-    private func call(_ body: (HazmatDaemonXPC, @escaping (Int32, String?) -> Void) -> Void) -> PrivilegedWriteResult {
+    private func answer(_ attempt: () -> Attempt) -> PrivilegedWriteResult {
+        attemptedTwice(attempt).result
+    }
+
+    private func call(_ body: (HazmatDaemonXPC, @escaping (Int32, String?) -> Void) -> Void) -> Attempt {
         let connection = NSXPCConnection(machServiceName: machServiceName, options: [])
         connection.remoteObjectInterface = NSXPCInterface(with: HazmatDaemonXPC.self)
 
         let box = ReplyBox()
         let answered = DispatchSemaphore(value: 0)
         connection.invalidationHandler = {
-            box.finish(.failed(reason: "the helper is not running"))
+            box.lost(reason: "the helper is not running")
             answered.signal()
         }
         connection.interruptionHandler = {
-            box.finish(.failed(reason: "the connection to the helper was interrupted"))
+            box.lost(reason: "the connection to the helper was interrupted")
             answered.signal()
         }
         connection.resume()
 
         guard let proxy = connection.remoteObjectProxyWithErrorHandler({ error in
-            box.finish(.failed(reason: "the helper is unreachable: \(error.localizedDescription)"))
+            box.lost(reason: "the helper is unreachable: \(error.localizedDescription)")
             answered.signal()
         }) as? HazmatDaemonXPC else {
             connection.invalidate()
-            return .failed(reason: "the helper did not expose its interface")
+            return .noReply(reason: "the helper did not expose its interface")
         }
 
         body(proxy) { status, reason in
@@ -58,10 +66,10 @@ public final class DaemonClient: PrivilegedWriter, @unchecked Sendable {
         }
 
         if answered.wait(timeout: .now() + timeout) == .timedOut {
-            box.finish(.failed(reason: "the helper did not answer in time"))
+            box.lost(reason: "the helper did not answer in time")
         }
         connection.invalidate()
-        return box.value
+        return box.attempt
     }
 
     private static func result(status: Int32, reason: String?) -> PrivilegedWriteResult {
@@ -78,23 +86,64 @@ public final class DaemonClient: PrivilegedWriter, @unchecked Sendable {
     }
 }
 
+/// The daemon stops when it has nothing to serve, so a request that arrives as it
+/// stops finds nothing listening. launchd starts the installed build for the next
+/// message, so that request is made once more. A refusal is an answer, and an
+/// answer is never repeated.
+func attemptedTwice(_ attempt: () -> Attempt) -> Attempt {
+    switch attempt() {
+    case .answer(let result):
+        return .answer(result)
+    case .noReply(let reason):
+        switch attempt() {
+        case .answer(let result): return .answer(result)
+        case .noReply: return .noReply(reason: reason)
+        }
+    }
+}
+
+/// One exchange with the daemon: the daemon's answer, or a connection that died
+/// before there was one.
+enum Attempt: Equatable {
+    case answer(PrivilegedWriteResult)
+    case noReply(reason: String)
+
+    var result: PrivilegedWriteResult {
+        switch self {
+        case .answer(let result): return result
+        case .noReply(let reason): return .failed(reason: reason)
+        }
+    }
+}
+
 /// First answer wins: the reply, the error handler, the interruption handler,
 /// and the invalidation handler can all fire on the same request.
 private final class ReplyBox: @unchecked Sendable {
     private let lock = NSLock()
-    private var result: PrivilegedWriteResult?
+    private var answer: PrivilegedWriteResult?
+    private var lostReason: String?
 
     func finish(_ value: PrivilegedWriteResult) {
         lock.lock()
         defer { lock.unlock() }
-        if result == nil {
-            result = value
+        if answer == nil && lostReason == nil {
+            answer = value
         }
     }
 
-    var value: PrivilegedWriteResult {
+    /// A connection that died, which is retryable, as opposed to a refusal.
+    func lost(reason: String) {
         lock.lock()
         defer { lock.unlock() }
-        return result ?? .failed(reason: "the helper gave no answer")
+        if answer == nil && lostReason == nil {
+            lostReason = reason
+        }
+    }
+
+    var attempt: Attempt {
+        lock.lock()
+        defer { lock.unlock() }
+        if let answer { return .answer(answer) }
+        return .noReply(reason: lostReason ?? "the helper gave no answer")
     }
 }

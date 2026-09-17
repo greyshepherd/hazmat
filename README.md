@@ -22,8 +22,23 @@ turns the block off. The active profile is derived from the file's bytes, so an
 edit made by another tool is reported as drift rather than overwritten. Editing
 the store needs no privilege, and it stays inside the store.
 
-Still to come: packaging, signing, and the update channel. The daemon accepts
-finished bytes only, and the store stays the source of truth.
+A bundle is assembled from one configuration: the app icon and the status item's
+mark come from the exported brand set, the version and the feed come from one
+file, and the update framework is embedded and signed with the rest. Still to
+come: a notarized release, and a published feed to point the update channel at.
+The daemon accepts finished bytes only, and the store stays the source of truth.
+
+## Building
+
+```
+Scripts/assemble-bundle.sh debug     # signed ad-hoc, declares no feed
+Scripts/assemble-bundle.sh release   # signed with a Developer ID, declares the feed
+open build/Hazmat.app
+```
+
+`Scripts/verify-bundle.sh build/Hazmat.app` reports what a bundle carries, what it
+reports, what it loads, and how it is signed. `release/README.md` describes the
+values a release reads.
 
 ## License
 

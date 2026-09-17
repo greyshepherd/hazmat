@@ -2,20 +2,11 @@ import Foundation
 import XCTest
 
 final class ShellIsolationTests: XCTestCase {
-    /// What is still absent: packaging, signing, notarization, and the update
-    /// channel. The profile editor and the resolved view are built, so they are
-    /// no longer guarded against; the editor's own thinness is guarded below.
-    func testTheSourcesCarryNoPackagingSigningNotarizationOrUpdateCode() {
-        let sources = [
-            "Sources/HazmatApp",
-            "Sources/HazmatAppSupport",
-            "Sources/HazmatCore",
-            "Sources/HazmatDaemon",
-            "Sources/HazmatPrivileged",
-            "Sources/HazmatProtocol"
-        ].flatMap { sourceFiles(in: $0) }
-        XCTAssertFalse(sources.isEmpty, "the sources are missing")
-
+    /// Where packaging, signing, notarization, and update code may live: nowhere
+    /// below the app. The core, the protocol, the privileged side, and app
+    /// support describe behavior, so none of them may reach for a feed, a
+    /// signature, or a tool that ships a release.
+    func testThePackagingAndUpdateVocabularyStaysOutOfTheLibraries() {
         let forbidden = [
             "pkgbuild",
             "productbuild",
@@ -33,10 +24,36 @@ final class ShellIsolationTests: XCTestCase {
             "appcast"
         ]
 
-        for (file, source) in sources {
-            for needle in forbidden {
-                XCTAssertNil(source.range(of: needle), "\(file) contains \(needle)")
+        for directory in [
+            "Sources/HazmatCore",
+            "Sources/HazmatProtocol",
+            "Sources/HazmatPrivileged",
+            "Sources/HazmatAppSupport"
+        ] {
+            let sources = sourceFiles(in: directory)
+            XCTAssertFalse(sources.isEmpty, "\(directory) has no sources")
+            for (file, source) in sources {
+                for needle in forbidden {
+                    XCTAssertNil(source.range(of: needle), "\(directory)/\(file) contains \(needle)")
+                }
             }
+        }
+    }
+
+    /// ... and in the app it is one file: the adapter that performs the check.
+    /// Everything else, including the presentation, talks about updates without
+    /// knowing what performs them.
+    func testTheAppNamesTheUpdateFrameworkInOnePlace() {
+        let sources = sourceFiles(in: "Sources/HazmatApp")
+        let naming = sources.filter { $0.1.contains("Sparkle") }.map(\.0)
+        XCTAssertEqual(naming, ["UpdateChecker.swift"], "the update framework is named in: \(naming)")
+
+        let adapter = sources.first { $0.0 == "UpdateChecker.swift" }?.1 ?? ""
+        XCTAssertTrue(adapter.contains("import Sparkle"), adapter)
+        XCTAssertTrue(adapter.contains("UpdateChecking"), "the adapter must implement what app support declares")
+
+        for (file, source) in sources where file != "UpdateChecker.swift" {
+            XCTAssertNil(source.range(of: "SUFeedURL"), "\(file) reads the feed for itself")
         }
     }
 
@@ -96,7 +113,7 @@ final class ShellIsolationTests: XCTestCase {
     func testTheAppCreatesOneModelAndHandsItToBothScenes() {
         let sources = sourceFiles(in: "Sources/HazmatApp")
         let constructions = sources.reduce(0) { total, source in
-            total + source.1.components(separatedBy: "ShellModel()").count - 1
+            total + source.1.components(separatedBy: "ShellModel(").count - 1
         }
 
         XCTAssertEqual(constructions, 1, "one instance, shared: \(sources.map(\.0))")
@@ -112,12 +129,27 @@ final class ShellIsolationTests: XCTestCase {
         let entryPoint = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "HazmatApp.swift" }?.1 ?? ""
 
         XCTAssertTrue(
-            entryPoint.contains("Text(model.menu.statusTitle)"),
-            "the title must come from the presentation in app support: \(entryPoint)"
+            entryPoint.contains("StatusLabel(title: model.menu.statusTitle)"),
+            "the status item's content must come from the presentation in app support: \(entryPoint)"
         )
 
         for needle in ["if ", "guard ", "switch ", "ForEach", "filter", ".contains(", "== "] {
             XCTAssertNil(entryPoint.range(of: needle), "\(entryPoint) contains \(needle)")
+        }
+    }
+
+    /// The mark is a template image the system tints, and the title beside it is
+    /// the part that says what is on.
+    func testTheMarkIsATemplateTheSystemTints() {
+        let mark = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
+        XCTAssertFalse(mark.isEmpty, "the status item's mark is missing")
+        XCTAssertTrue(mark.contains("isTemplate = true"), mark)
+        XCTAssertTrue(mark.contains("Text(title)"), "the mark must not replace the state title: \(mark)")
+
+        for (file, source) in sourceFiles(in: "Sources/HazmatApp") {
+            for needle in ["renderingMode(.original)", "isTemplate = false", "isTemplate=false", ".tint("] {
+                XCTAssertNil(source.range(of: needle), "\(file) recolours the mark with \(needle)")
+            }
         }
     }
 

@@ -111,6 +111,36 @@ final class BoundaryTests: XCTestCase {
         XCTAssertTrue(requirement.requirement.contains("certificate leaf[subject.OU] = \"ABCDE12345\""))
     }
 
+    /// The rule the daemon applies is the one its own signature implies, so it
+    /// cannot disagree with how the daemon was built.
+    func testTheRequirementFollowsTheDaemonsOwnSignature() {
+        let requirement = SignatureVerifier.forOwnBundle()
+
+        XCTAssertTrue(
+            requirement.requirement.hasPrefix("identifier \"com.greyshepherd.hazmat\""),
+            requirement.requirement
+        )
+        // This test bundle carries no team, so there is nothing to anchor; a
+        // distribution build gets the anchored form, which is checked by signing
+        // one and asking it.
+        XCTAssertFalse(requirement.requirement.contains("anchor apple"), requirement.requirement)
+        XCTAssertEqual(requirement.requirement, SignatureVerifier.development(appIdentifier: "com.greyshepherd.hazmat").requirement)
+    }
+
+    func testATeamAnchoredRequirementRefusesAClientWithoutThatTeam() throws {
+        var selfCode: SecCode?
+        XCTAssertEqual(SecCodeCopySelf([], &selfCode), errSecSuccess)
+        let code = try XCTUnwrap(selfCode)
+        let ownIdentifier = try signingIdentifier(of: code)
+
+        // The process being checked is this one, which was not signed by the team
+        // the daemon would name: an ad-hoc build of the same identifier is exactly
+        // the client a distribution daemon must refuse.
+        let anchored = SignatureVerifier.shipping(appIdentifier: ownIdentifier, teamIdentifier: "ABCDE12345")
+        XCTAssertFalse(anchored.accepts(code: code))
+        XCTAssertFalse(anchored.accepts(processIdentifier: getpid()))
+    }
+
     func testAClientThatDoesNotSatisfyTheRequirementIsRefused() throws {
         var selfCode: SecCode?
         XCTAssertEqual(SecCodeCopySelf([], &selfCode), errSecSuccess)
@@ -161,6 +191,43 @@ final class BoundaryTests: XCTestCase {
         XCTAssertNotNil(acceptedConnection.exportedInterface)
         XCTAssertNotNil(acceptedConnection.exportedObject)
         XCTAssertEqualBytes(try directory.contents(), live, "accepting a connection must write nothing")
+    }
+
+    /// The listener hands connection open and close to the idle rule, so a daemon
+    /// with nothing to serve stops and the build on disk serves the next request.
+    func testTheListenerKeepsTheDaemonAliveOnlyWhileAClientIsConnected() throws {
+        let directory = try TemporaryDirectory()
+        defer { directory.remove() }
+        try directory.write(appliedHosts())
+        let handler = DaemonWriteHandler(
+            service: PrivilegedWriteService(target: directory.target, owner: testOwnership())
+        )
+
+        let stoppedWhileConnected = expectation(description: "the rule must not fire while a client is connected")
+        stoppedWhileConnected.isInverted = true
+        let stoppedWhenIdle = expectation(description: "the rule fires once the client is gone")
+        let phase = ConnectionPhase()
+        let idle = IdleExit(after: .milliseconds(100)) {
+            if phase.isConnected {
+                stoppedWhileConnected.fulfill()
+            } else {
+                stoppedWhenIdle.fulfill()
+            }
+        }
+        let delegate = DaemonListenerDelegate(
+            handler: handler,
+            verifier: AlwaysAccepts(),
+            idleExit: idle
+        )
+        let listener = NSXPCListener.anonymous()
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+
+        XCTAssertTrue(delegate.listener(listener, shouldAcceptNewConnection: connection))
+        wait(for: [stoppedWhileConnected], timeout: 0.3)
+
+        phase.disconnect()
+        connection.invalidate()
+        wait(for: [stoppedWhenIdle], timeout: 3)
     }
 
     // MARK: - 4.4 No shell, no external program
@@ -219,4 +286,22 @@ func argumentTypes(of encoding: String?) -> [String] {
         index = encoding.index(after: index)
     }
     return types
+}
+
+/// Which phase a test's idle rule is in.
+private final class ConnectionPhase: @unchecked Sendable {
+    private let lock = NSLock()
+    private var connected = true
+
+    var isConnected: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return connected
+    }
+
+    func disconnect() {
+        lock.lock()
+        defer { lock.unlock() }
+        connected = false
+    }
 }
