@@ -72,7 +72,7 @@ final class ActiveProfileReadingTests: XCTestCase {
 
         let reading = catalogue.activation(reading: CountingFile(stranger))
 
-        XCTAssertEqual(reading.activation?.state, .drifted)
+        XCTAssertEqual(reading.activation?.state, .drifted(liveBlock: stranger))
     }
 
     // MARK: - 2.2 A missing or empty store is its own result
@@ -147,11 +147,32 @@ final class ActiveProfileReadingTests: XCTestCase {
 
     // MARK: - Replacing the live block is a switch only when it belongs to a profile
 
+    /// The menu's deliberate overwrite names the block the derivation found, so
+    /// the apply that follows replaces exactly the bytes that were read.
+    func testTheOverwriteTheMenuOffersCarriesTheBlockTheDerivationFound() throws {
+        let store = try makeStore([
+            ("127.0.0.1\tlocalhost\n", "fragments/base.hosts"),
+            ("base\n", "profiles/work.profile")
+        ])
+        defer { store.remove() }
+        let stranger = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
+
+        let reading = ProfileCatalogue(root: store.root).activation(reading: CountingFile(stranger))
+        guard case .drifted(let found)? = reading.activation?.state else {
+            return XCTFail("expected a drift, got \(reading)")
+        }
+        let menu = MenuPresentation(reading: reading, helper: .enabled, notice: "")
+        let item = menu.sections.flatMap(\.items).first { $0.title == "Overwrite drift with 'work'" }
+
+        XCTAssertEqual(found, stranger)
+        XCTAssertEqual(item?.action, .overwriteDrift(work, liveBlock: found))
+    }
+
     func testOnlyABlockThatBelongsToAProfileMayBeReplacedAsASwitch() {
         let work = ProfileID("work")
 
         XCTAssertTrue(derived([work], .active([work])).replacingIsASwitch)
-        XCTAssertFalse(derived([work], .drifted).replacingIsASwitch)
+        XCTAssertFalse(derived([work], .drifted(liveBlock: Data("x".utf8))).replacingIsASwitch)
         XCTAssertFalse(derived([work], .off).replacingIsASwitch)
         XCTAssertFalse(derived([work], .unreadable(.unterminatedBlock(line: 1))).replacingIsASwitch)
         XCTAssertFalse(ActiveProfileReading.missingStore.replacingIsASwitch)

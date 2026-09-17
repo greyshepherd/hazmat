@@ -34,25 +34,20 @@ public struct InMemoryStore: HostsStore {
 /// `<root>/profiles/<name>.profile`, both plain text that any editor or version
 /// control system can change.
 public struct DirectoryStore: HostsStore {
-    public let root: URL
+    public let layout: StoreLayout
 
     public init(root: URL) {
-        self.root = root
+        layout = StoreLayout(root: root)
     }
 
+    public var root: URL { layout.root }
+
     public func fragment(named id: FragmentID) throws -> String? {
-        try text(at: url(directory: "fragments", name: id.rawValue, extension: "hosts"))
+        try text(at: layout.fragmentURL(id))
     }
 
     public func profile(named id: ProfileID) throws -> String? {
-        try text(at: url(directory: "profiles", name: id.rawValue, extension: "profile"))
-    }
-
-    private func url(directory: String, name: String, extension fileExtension: String) -> URL {
-        root
-            .appendingPathComponent(directory)
-            .appendingPathComponent(name)
-            .appendingPathExtension(fileExtension)
+        try text(at: layout.profileURL(id))
     }
 
     private func text(at url: URL) throws -> String? {

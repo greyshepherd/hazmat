@@ -34,8 +34,10 @@ public enum ActiveProfileState: Equatable, Sendable {
     case off
     /// The markers cannot be read as one supported block.
     case unreadable(BlockError)
-    /// The block is well-formed and matches no profile's rendering.
-    case drifted
+    /// The block is well-formed and matches no profile's rendering. It carries
+    /// the live block, so a deliberate overwrite names the bytes it replaces
+    /// rather than locating them a second time.
+    case drifted(liveBlock: Data)
     /// The profiles whose rendering is byte-identical to the live block.
     case active([ProfileID])
 }
@@ -102,6 +104,6 @@ public enum Activation {
             .filter { $0.rendering == .block(block) }
             .map(\.profile)
             .sorted()
-        return ActiveProfile(state: matched.isEmpty ? .drifted : .active(matched), problems: problems)
+        return ActiveProfile(state: matched.isEmpty ? .drifted(liveBlock: block) : .active(matched), problems: problems)
     }
 }

@@ -1,5 +1,15 @@
 import Foundation
 
+/// What the caller expects to find in the live file, and therefore what an
+/// apply may replace. The expectation is the caller's proof: an apply replaces a
+/// block only when it is byte-identical to the one named here.
+public enum Replacement: Equatable, Sendable {
+    /// Write only where the file holds no block.
+    case onlyIfAbsent
+    /// Replace this block, which the caller read and intends to replace.
+    case block(Data)
+}
+
 /// How an apply changed the file.
 public enum AppliedChange: Equatable, Sendable {
     case installedBlock
@@ -9,8 +19,9 @@ public enum AppliedChange: Equatable, Sendable {
 
 /// Why an apply was refused. Refusal is a decision made before writing.
 public enum ApplyRefusal: Equatable, Sendable, CustomStringConvertible {
-    /// The live block differs from the rendered block and the caller did not ask
-    /// for it to be overwritten.
+    /// The live block is not the one the caller named, or the caller named no
+    /// block while the file holds one. Either way the difference is drift and
+    /// nothing is written.
     case driftNotOverwritten
     /// The live file's markers cannot be read as one supported block.
     case liveFile(BlockError)
@@ -24,7 +35,7 @@ public enum ApplyRefusal: Equatable, Sendable, CustomStringConvertible {
     public var description: String {
         switch self {
         case .driftNotOverwritten:
-            return "the block in the live file differs from the rendered block; overwriting it was not asked for"
+            return "the live block is not the one this apply expects; the difference is drift and it was left alone"
         case .liveFile(let error):
             return "the live file is refused: \(error)"
         case .unusableBlock(let refusal):
@@ -113,9 +124,14 @@ public struct HostsFileApplier: Sendable {
         try file.state(rendered: rendered)
     }
 
-    /// Installs `block` at `position`, replacing a drifted block only when the
-    /// caller asks for that.
-    public func apply(block: Data, position: BlockPosition = .default, overwriteDrift: Bool = false) -> ApplyOutcome {
+    /// Installs `block` at `position`. The replacement carries the caller's
+    /// expectation: no block at all, or the exact block it read and intends to
+    /// replace.
+    public func apply(
+        block: Data,
+        position: BlockPosition = .default,
+        replacement: Replacement = .onlyIfAbsent
+    ) -> ApplyOutcome {
         let live: Data
         do {
             live = try file.read()
@@ -123,16 +139,34 @@ public struct HostsFileApplier: Sendable {
             return .failed(reason: "reading \(file.url.path): \(error)")
         }
 
-        let state = BlockState.classify(live: live, rendered: block)
-        switch state {
-        case .refused(let error):
+        let present: Data?
+        do {
+            if let location = try ManagedBlock.locate(in: live) {
+                guard location.version == ManagedBlock.version else {
+                    return .refused(.liveFile(.unsupportedVersion(found: location.version, expected: ManagedBlock.version)))
+                }
+                present = Data(live[location.range])
+            } else {
+                present = nil
+            }
+        } catch let error as BlockError {
             return .refused(.liveFile(error))
-        case .unchanged:
-            return .nothingToDo
-        case .drifted where !overwriteDrift:
-            return .refused(.driftNotOverwritten)
-        case .absent, .drifted:
+        } catch {
+            return .refused(.liveFile(.invalidBlock("\(error)")))
+        }
+
+        if present == block { return .nothingToDo }
+
+        switch (present, replacement) {
+        case (nil, .onlyIfAbsent):
             break
+        case (nil, .block):
+            // Nothing to replace, so the caller's expectation cannot hold.
+            return .refused(.driftNotOverwritten)
+        case (.some, .onlyIfAbsent):
+            return .refused(.driftNotOverwritten)
+        case (.some(let liveBlock), .block(let expected)):
+            guard liveBlock == expected else { return .refused(.driftNotOverwritten) }
         }
 
         let planned: Data
@@ -157,7 +191,7 @@ public struct HostsFileApplier: Sendable {
 
         switch writer.write(bytes: planned, baseline: live) {
         case .written:
-            return .applied(state == .drifted ? .replacedBlock(overwroteDrift: true) : .installedBlock)
+            return .applied(present == nil ? .installedBlock : .replacedBlock(overwroteDrift: true))
         case .refused(let reason):
             return .refused(.privileged(reason))
         case .failed(let reason):

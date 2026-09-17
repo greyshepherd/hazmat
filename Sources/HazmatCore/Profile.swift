@@ -20,6 +20,13 @@ public struct ProfileReference: Equatable, Sendable {
     }
 }
 
+/// The text a profile is written as: one fragment reference per line.
+public enum ProfileText {
+    public static func render(_ layers: [FragmentID]) -> String {
+        layers.map { "\($0.rawValue)\n" }.joined()
+    }
+}
+
 /// Reads a profile: one fragment reference per line, comments and blank lines
 /// permitted, order preserved.
 public enum ProfileParser {

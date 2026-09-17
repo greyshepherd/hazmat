@@ -94,8 +94,9 @@ final class MenuPresentationTests: XCTestCase {
     }
 
     func testADriftedBlockReportsDriftAndOffersLabelledOverwrites() {
+        let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
         let menu = MenuPresentation(
-            reading: derived([ads, work], .drifted),
+            reading: derived([ads, work], .drifted(liveBlock: block)),
             helper: .enabled,
             notice: ""
         )
@@ -105,7 +106,7 @@ final class MenuPresentationTests: XCTestCase {
         XCTAssertEqual(titles(menu, "overwrite"), ["Overwrite drift with 'ads'", "Overwrite drift with 'work'"])
         XCTAssertEqual(
             menuItem(menu, titled: "Overwrite drift with 'work'")?.action,
-            .overwriteDrift(work)
+            .overwriteDrift(work, liveBlock: block)
         )
         XCTAssertTrue(
             lines(menu).contains(where: { $0.contains("matches no profile") }),
@@ -215,14 +216,15 @@ final class MenuPresentationTests: XCTestCase {
     // MARK: - 3.3 Overwrites are deliberate and labelled
 
     func testEveryOverwriteIsLabelledAndNamesTheProfileItWouldWrite() {
+        let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
         let menu = MenuPresentation(
-            reading: derived([ads, work], .drifted),
+            reading: derived([ads, work], .drifted(liveBlock: block)),
             helper: .enabled,
             notice: ""
         )
 
         let overwrites = menu.sections.flatMap(\.items).compactMap { item -> (String, ProfileID)? in
-            guard case .overwriteDrift(let profile)? = item.action else { return nil }
+            guard case .overwriteDrift(let profile, _)? = item.action else { return nil }
             return (item.title, profile)
         }
 
@@ -234,9 +236,27 @@ final class MenuPresentationTests: XCTestCase {
         }
     }
 
-    func testABareProfileNameIsASwitchAndNeverAnOverwrite() {
+    /// The deliberate overwrite replaces exactly the block the derivation read:
+    /// the block travels in the action rather than being located again.
+    func testTheOverwriteCarriesTheBlockTheDerivationFound() {
+        let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
         let menu = MenuPresentation(
-            reading: derived([ads, work], .drifted),
+            reading: derived([ads, work], .drifted(liveBlock: block)),
+            helper: .enabled,
+            notice: ""
+        )
+
+        XCTAssertEqual(menuItem(menu, titled: "Overwrite drift with 'work'")?.action, .overwriteDrift(work, liveBlock: block))
+        XCTAssertEqual(
+            menuItem(menu, titled: "Overwrite drift with 'ads'")?.action,
+            .overwriteDrift(ads, liveBlock: block)
+        )
+    }
+
+    func testABareProfileNameIsASwitchAndNeverAnOverwrite() {
+        let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
+        let menu = MenuPresentation(
+            reading: derived([ads, work], .drifted(liveBlock: block)),
             helper: .enabled,
             notice: ""
         )

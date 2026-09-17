@@ -2,26 +2,76 @@ import Foundation
 import XCTest
 
 final class ShellIsolationTests: XCTestCase {
-    func testTheShellCarriesNoProfileEditorAndNoResolvedView() {
-        let sources = sourceFiles(in: "Sources/HazmatApp")
-        XCTAssertFalse(sources.isEmpty, "the app target has no sources")
+    /// What is still absent: packaging, signing, notarization, and the update
+    /// channel. The profile editor and the resolved view are built, so they are
+    /// no longer guarded against; the editor's own thinness is guarded below.
+    func testTheSourcesCarryNoPackagingSigningNotarizationOrUpdateCode() {
+        let sources = [
+            "Sources/HazmatApp",
+            "Sources/HazmatAppSupport",
+            "Sources/HazmatCore",
+            "Sources/HazmatDaemon",
+            "Sources/HazmatPrivileged",
+            "Sources/HazmatProtocol"
+        ].flatMap { sourceFiles(in: $0) }
+        XCTAssertFalse(sources.isEmpty, "the sources are missing")
 
         let forbidden = [
-            "NSStatusItem",
-            "NSStatusBar",
-            "Settings {",
-            "Settings(",
-            "ProfileEditor",
-            "TextField",
-            "TextEditor",
-            "onDelete",
-            ".resolved"
+            "pkgbuild",
+            "productbuild",
+            "hdiutil",
+            "__MACOSX",
+            "codesign",
+            "notariz",
+            "Notariz",
+            "notarytool",
+            "altool",
+            "stapler",
+            "Sparkle",
+            "SUUpdater",
+            "SUFeedURL",
+            "appcast"
         ]
 
         for (file, source) in sources {
             for needle in forbidden {
                 XCTAssertNil(source.range(of: needle), "\(file) contains \(needle)")
             }
+        }
+    }
+
+    /// The editor scene renders the presentation and forwards choices: it names
+    /// no store, no composition, and no file path. The menu bar scene is held to
+    /// the same rule below.
+    func testTheEditorSceneDecidesNothingItself() {
+        let scene = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellView.swift" }?.1 ?? ""
+        XCTAssertFalse(scene.isEmpty, "the editor scene is missing")
+        XCTAssertTrue(scene.contains("EditorPresentation"), scene)
+        XCTAssertTrue(scene.contains("let editor = model.editor"), scene)
+
+        let forbidden = [
+            "StoreLayout",
+            "StoreWriter",
+            "DirectoryStore",
+            "InMemoryStore",
+            "HostsStore",
+            "HostsComposer",
+            "Composition",
+            "ProfileCatalogue",
+            "ProfileParser",
+            "EditorModel",
+            "HostsFileApplier",
+            "PrivilegedWriter",
+            "DaemonClient",
+            "FileManager",
+            "appendingPathComponent",
+            "Data(contentsOf",
+            "String(contentsOf",
+            "URL("
+        ]
+
+        for needle in forbidden {
+            XCTAssertNil(scene.range(of: needle), "the editor scene contains \(needle)")
         }
     }
 

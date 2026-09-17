@@ -4,42 +4,68 @@ import HazmatCore
 import HazmatProtocol
 import Observation
 
-/// The shell's state: the helper, the profiles a store holds, and the state of
-/// the live file for the selected profile. Nothing here edits a profile or
-/// resolves one.
+/// The shell's state: the helper, the profiles a store holds, and the editor's
+/// last read. Decisions live in app support; this holds what was read and
+/// forwards choices.
 @MainActor
 @Observable
 final class ShellModel {
     private(set) var helper: HelperState = .notRegistered
     private(set) var profiles: [ProfileID] = []
-    private(set) var drift = ""
     private(set) var notice = ""
-    private(set) var storePath = ""
     private(set) var busy = false
     private(set) var reading: ActiveProfileReading = .missingStore
+    private(set) var editor: EditorPresentation
     var selectedProfile: ProfileID?
+    var selectedFragment: FragmentID?
 
     private let registration: HelperRegistration
     private let catalogue: ProfileCatalogue
     private let applier: HostsFileApplier
     private let liveFile: LiveHostsFile
+    private let editorModel: EditorModel
 
     init(
         storeRoot: URL = StoreLocation.defaultRoot,
         fileURL: URL = DaemonTarget.hostsFile,
         writer: PrivilegedWriter? = nil
     ) {
+        let editorModel = EditorModel(storeRoot: storeRoot, fileURL: fileURL, writer: writer ?? DaemonClient())
         registration = HelperRegistration()
         catalogue = ProfileCatalogue(root: storeRoot)
         applier = HostsFileApplier(fileURL: fileURL, writer: writer ?? DaemonClient())
         liveFile = LiveHostsFile(url: fileURL)
-        storePath = storeRoot.path
+        self.editorModel = editorModel
+        editor = editorModel.read()
     }
 
     /// The menu bar item, derived from the last refresh. Presentation only: the
     /// items come from app support.
     var menu: MenuPresentation {
         MenuPresentation(reading: reading, helper: helper, notice: notice)
+    }
+
+    /// What the live file holds, for the window to name alongside the editor.
+    var liveDescription: String {
+        switch reading {
+        case .missingStore:
+            return "No store at this location."
+        case .emptyStore:
+            return "The store holds no profiles."
+        case .unreadableFile(_, let reason):
+            return "The live file could not be read: \(reason)"
+        case .derived(_, let activation):
+            switch activation.state {
+            case .off:
+                return "No block is applied."
+            case .unreadable(let error):
+                return "The live file's markers cannot be read: \(error)"
+            case .drifted:
+                return "The live block matches no profile, so it is reported as drift."
+            case .active(let profiles):
+                return "Active: \(profiles.map(\.rawValue).joined(separator: ", "))"
+            }
+        }
     }
 
     func refresh() {
@@ -57,7 +83,20 @@ final class ShellModel {
             let fallback = profiles.first
             if fallback != selectedProfile { selectedProfile = fallback }
         }
-        refreshDrift()
+        refreshEditor()
+    }
+
+    /// Re-reads the store and the live file for the window. Called when the
+    /// selection changes, so the editor shows what is selected now.
+    func selectionChanged() {
+        refreshEditor()
+    }
+
+    private func refreshEditor() {
+        let latest = editorModel.read(profile: selectedProfile, fragment: selectedFragment)
+        if latest.selectedProfile != selectedProfile { selectedProfile = latest.selectedProfile }
+        if latest.selectedFragment != selectedFragment { selectedFragment = latest.selectedFragment }
+        if latest != editor { editor = latest }
     }
 
     func register() {
@@ -80,39 +119,117 @@ final class ShellModel {
         refresh()
     }
 
-    func refreshDrift() {
-        let updated: String
-        if let profile = selectedProfile {
-            do {
-                updated = Self.describe(try applier.state(rendered: try catalogue.renderedBlock(for: profile)))
-            } catch {
-                updated = "The file could not be read: \(error)"
-            }
-        } else {
-            updated = catalogue.exists ? "No profile selected." : "No store at \(catalogue.root.path)."
-        }
-        if updated != drift { drift = updated }
+    // MARK: - The store
+
+    func createProfile(named name: String) {
+        finish(editorModel.createProfile(named: name))
     }
 
-    func apply(overwriteDrift: Bool) {
+    func createFragment(named name: String) {
+        finish(editorModel.createFragment(named: name))
+    }
+
+    func renameProfile(to name: String) {
         guard let profile = selectedProfile else { return }
-        activate(profile, overwriteDrift: overwriteDrift)
+        finish(editorModel.rename(profile: profile, to: name))
+    }
+
+    func renameFragment(to name: String) {
+        guard let fragment = selectedFragment else { return }
+        finish(editorModel.rename(fragment: fragment, to: name))
+    }
+
+    func duplicateProfile(as name: String) {
+        guard let profile = selectedProfile else { return }
+        finish(editorModel.duplicate(profile: profile, as: name))
+    }
+
+    func duplicateFragment(as name: String) {
+        guard let fragment = selectedFragment else { return }
+        finish(editorModel.duplicate(fragment: fragment, as: name))
+    }
+
+    func deleteProfile() {
+        guard let profile = selectedProfile else { return }
+        finish(editorModel.delete(profile: profile))
+    }
+
+    func deleteFragment() {
+        guard let fragment = selectedFragment else { return }
+        finish(editorModel.delete(fragment: fragment))
+    }
+
+    /// Saves the edited text, then re-applies the profile whose block is live
+    /// when the block is still the one that profile rendered before the edit.
+    func saveFragment(text: String) {
+        guard let fragment = selectedFragment, let profile = selectedProfile else { return }
+        finish(editorModel.save(fragment: fragment, text: text, editing: profile, previous: editor))
+    }
+
+    func addLayer(_ fragment: FragmentID) {
+        guard let profile = selectedProfile else { return }
+        finish(editorModel.addLayer(fragment, to: profile, previous: editor))
+    }
+
+    func removeLayer(at index: Int) {
+        guard let profile = selectedProfile else { return }
+        finish(editorModel.removeLayer(at: index, from: profile, previous: editor))
+    }
+
+    func moveLayer(from index: Int, to destination: Int) {
+        guard let profile = selectedProfile else { return }
+        finish(editorModel.moveLayer(from: index, to: destination, in: profile, previous: editor))
+    }
+
+    // MARK: - The live file
+
+    /// Applies the selected profile, naming the block it read when the live file
+    /// already holds one.
+    func apply() {
+        guard let profile = selectedProfile else { return }
+        switch reading.activation?.state {
+        case .active(let profiles):
+            guard let matched = profiles.first else { return }
+            apply(profile, replacing: namingTheMatchedProfile(matched))
+        default:
+            apply(profile, replacing: .onlyIfAbsent)
+        }
     }
 
     /// Activates a profile from the store. The live file is read again rather
     /// than trusting the menu's look: a block that changed since then must not be
-    /// replaced unless it still belongs to a profile.
+    /// replaced unless it still holds the block the matched profile rendered.
     func activate(_ profile: ProfileID) {
         let fresh = catalogue.activation(reading: liveFile)
-        activate(profile, overwriteDrift: fresh.replacingIsASwitch)
+        guard let matched = fresh.activation?.activeProfiles.first else {
+            apply(profile, replacing: .onlyIfAbsent)
+            return
+        }
+        apply(profile, replacing: namingTheMatchedProfile(matched))
     }
 
-    /// Replaces a block no profile owns, which the menu offered as its own item.
-    func overwriteDrift(with profile: ProfileID) {
-        activate(profile, overwriteDrift: true)
+    /// Replaces the block no profile owns, which the menu offered as its own
+    /// item. The reading named the block, so the apply replaces exactly it.
+    func overwriteDrift(with profile: ProfileID, liveBlock: Data) {
+        apply(profile, replacing: .block(liveBlock))
     }
 
-    private func activate(_ profile: ProfileID, overwriteDrift: Bool) {
+    /// The window's deliberate overwrite: the selected profile replaces the
+    /// drifted block the editor's last read found.
+    func overwriteDrift() {
+        guard let profile = editor.selectedProfile, let block = editor.live.liveBlock else { return }
+        apply(profile, replacing: .block(block))
+    }
+
+    private func namingTheMatchedProfile(_ matched: ProfileID) -> Replacement {
+        do {
+            return .block(try catalogue.renderedBlock(for: matched))
+        } catch {
+            return .onlyIfAbsent
+        }
+    }
+
+    private func apply(_ profile: ProfileID, replacing replacement: Replacement) {
         let catalogue = self.catalogue
         let applier = self.applier
         busy = true
@@ -122,7 +239,7 @@ final class ShellModel {
             do {
                 outcome = applier.apply(
                     block: try catalogue.renderedBlock(for: profile),
-                    overwriteDrift: overwriteDrift
+                    replacement: replacement
                 )
             } catch {
                 outcome = .failed(reason: "rendering \(profile): \(error)")
@@ -147,16 +264,8 @@ final class ShellModel {
         refresh()
     }
 
-    static func describe(_ state: BlockState) -> String {
-        switch state {
-        case .absent:
-            return "No block is applied."
-        case .unchanged:
-            return "The applied block matches the rendered block."
-        case .drifted:
-            return "The applied block differs from the rendered block."
-        case .refused(let error):
-            return "The file's markers are refused: \(error)"
-        }
+    private func finish(_ outcome: EditorOutcome) {
+        notice = outcome.description
+        refresh()
     }
 }

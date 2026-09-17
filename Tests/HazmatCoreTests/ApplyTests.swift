@@ -190,7 +190,7 @@ final class ApplyTests: XCTestCase {
         XCTAssertEqual(try target.snapshot(), before)
     }
 
-    func testOverwritesDriftWhenTheCallerAsksAndReportsThatItDid() throws {
+    func testOverwritesDriftWhenTheCallerNamesTheBlockAndReportsThatItDid() throws {
         let rendered = try renderedWorkBlock()
         let shipped = try shippedHosts()
         let target = try file(try BlockSplice.splice(block: rendered, into: shipped))
@@ -200,12 +200,113 @@ final class ApplyTests: XCTestCase {
             try composition(fragments: [("base", "127.0.0.1\tchanged.example\n")], profile: "base\n")
         )
 
-        XCTAssertEqual(applier.apply(block: changed, overwriteDrift: true), .applied(.replacedBlock(overwroteDrift: true)))
+        XCTAssertEqual(
+            applier.apply(block: changed, replacement: .block(rendered)),
+            .applied(.replacedBlock(overwroteDrift: true))
+        )
 
         let planned = try XCTUnwrap(writer.writes.last?.bytes)
         XCTAssertEqualBytes(try BlockSplice.strip(from: planned), shipped)
         let location = try XCTUnwrap(ManagedBlock.locate(in: planned))
         XCTAssertEqualBytes(Data(planned[location.range]), changed)
+    }
+
+    func testRefusesANamedBlockThatDiffersFromTheLiveOneAndLeavesTheFileAlone() throws {
+        let rendered = try renderedWorkBlock()
+        let shipped = try shippedHosts()
+        let target = try file(try BlockSplice.splice(block: rendered, into: shipped))
+        let writer = RecordingWriter()
+        let applier = HostsFileApplier(fileURL: target.url, writer: writer)
+        let changed = BlockRenderer.render(
+            try composition(fragments: [("base", "127.0.0.1\tchanged.example\n")], profile: "base\n")
+        )
+        let stale = bytes(text(rendered).replacingOccurrences(of: "api.internal", with: "api.moved"))
+        let before = try target.snapshot()
+
+        XCTAssertEqual(applier.apply(block: changed, replacement: .block(stale)), .refused(.driftNotOverwritten))
+        XCTAssertTrue(writer.writes.isEmpty)
+        XCTAssertEqual(try target.snapshot(), before)
+    }
+
+    func testRefusesANamedBlockWhenTheFileHoldsNoneAndLeavesTheFileAlone() throws {
+        let rendered = try renderedWorkBlock()
+        let shipped = try shippedHosts()
+        let target = try file(shipped)
+        let writer = RecordingWriter()
+        let applier = HostsFileApplier(fileURL: target.url, writer: writer)
+        let before = try target.snapshot()
+
+        XCTAssertEqual(applier.apply(block: rendered, replacement: .block(rendered)), .refused(.driftNotOverwritten))
+        XCTAssertTrue(writer.writes.isEmpty)
+        XCTAssertEqual(try target.snapshot(), before)
+    }
+
+    func testRefusesWhenNoBlockIsNamedAndTheFileHoldsAnotherOne() throws {
+        let rendered = try renderedWorkBlock()
+        let shipped = try shippedHosts()
+        let target = try file(try BlockSplice.splice(block: rendered, into: shipped))
+        let writer = RecordingWriter()
+        let applier = HostsFileApplier(fileURL: target.url, writer: writer)
+        let changed = BlockRenderer.render(
+            try composition(fragments: [("base", "127.0.0.1\tchanged.example\n")], profile: "base\n")
+        )
+        let before = try target.snapshot()
+
+        XCTAssertEqual(applier.apply(block: changed, replacement: .onlyIfAbsent), .refused(.driftNotOverwritten))
+        XCTAssertTrue(writer.writes.isEmpty)
+        XCTAssertEqual(try target.snapshot(), before)
+    }
+
+    /// The outcome names a replacement, whether the named block was a profile's
+    /// rendering or a block no profile owned, and names an install for a first
+    /// apply. Both are asserted here, in the core's own outcomes.
+    func testAReplacementAndAFirstApplyReportDifferentOutcomes() throws {
+        let rendered = try renderedWorkBlock()
+        let shipped = try shippedHosts()
+        let changed = BlockRenderer.render(
+            try composition(fragments: [("base", "127.0.0.1\tchanged.example\n")], profile: "base\n")
+        )
+
+        let first = try file(shipped)
+        let firstWriter = RecordingWriter()
+        let firstApplier = HostsFileApplier(fileURL: first.url, writer: firstWriter)
+        XCTAssertEqual(firstApplier.apply(block: rendered), .applied(.installedBlock))
+
+        // A switch away from the matched profile: the named block is the
+        // rendering that profile produced.
+        let switching = try file(try BlockSplice.splice(block: rendered, into: shipped))
+        let switchingApplier = HostsFileApplier(fileURL: switching.url, writer: RecordingWriter())
+        XCTAssertEqual(
+            switchingApplier.apply(block: changed, replacement: .block(rendered)),
+            .applied(.replacedBlock(overwroteDrift: true))
+        )
+
+        // A deliberate overwrite: the named block is one no profile owns, which
+        // the derivation reports as drift.
+        let drifted = bytes(text(rendered).replacingOccurrences(of: "api.internal", with: "api.moved"))
+        XCTAssertEqual(Activation.match(live: drifted, renders: [ProfileRender(profile: ProfileID("work"), rendering: .block(rendered))]).state, .drifted(liveBlock: drifted))
+        let overwriting = try file(try BlockSplice.splice(block: drifted, into: shipped))
+        let overwritingApplier = HostsFileApplier(fileURL: overwriting.url, writer: RecordingWriter())
+        XCTAssertEqual(
+            overwritingApplier.apply(block: changed, replacement: .block(drifted)),
+            .applied(.replacedBlock(overwroteDrift: true))
+        )
+    }
+
+    func testARefusedExpectationReportsDrift() throws {
+        let rendered = try renderedWorkBlock()
+        let shipped = try shippedHosts()
+        let target = try file(try BlockSplice.splice(block: rendered, into: shipped))
+        let writer = RecordingWriter()
+        let applier = HostsFileApplier(fileURL: target.url, writer: writer)
+        let changed = BlockRenderer.render(
+            try composition(fragments: [("base", "127.0.0.1\tchanged.example\n")], profile: "base\n")
+        )
+
+        let refused = applier.apply(block: changed, replacement: .block(bytes("not the live block")))
+        XCTAssertEqual(refused, .refused(.driftNotOverwritten))
+        XCTAssertTrue(refused.description.contains("drift"), refused.description)
+        XCTAssertTrue(writer.writes.isEmpty)
     }
 
     func testFirstApplyInstallsTheBlockBehindTheShippedBytes() throws {

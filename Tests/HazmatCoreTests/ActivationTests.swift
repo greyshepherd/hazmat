@@ -81,7 +81,7 @@ final class ActivationTests: XCTestCase {
 
         XCTAssertEqual(Activation.match(live: empty, renders: [render]).state, .active([work]))
         // The same bytes with nothing rendering them are a block no profile owns.
-        XCTAssertEqual(Activation.match(live: empty, renders: []).state, .drifted)
+        XCTAssertEqual(Activation.match(live: empty, renders: []).state, .drifted(liveBlock: empty))
     }
 
     func testABlockMatchingNoRenderingIsDriftedAndNamesNoProfile() throws {
@@ -90,7 +90,7 @@ final class ActivationTests: XCTestCase {
 
         let result = Activation.match(live: block, renders: [ProfileRender(profile: work, rendering: .block(otherProfile))])
 
-        XCTAssertEqual(result.state, .drifted)
+        XCTAssertEqual(result.state, .drifted(liveBlock: block))
     }
 
     // MARK: - 1.2 A profile that cannot render is reported
@@ -120,7 +120,7 @@ final class ActivationTests: XCTestCase {
             renders: [ProfileRender(profile: work, rendering: .problem("the fragment is malformed"))]
         )
 
-        XCTAssertEqual(result.state, .drifted)
+        XCTAssertEqual(result.state, .drifted(liveBlock: block))
         XCTAssertEqual(result.problems, [ProfileRenderProblem(profile: work, reason: "the fragment is malformed")])
     }
 
