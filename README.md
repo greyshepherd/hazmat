@@ -12,14 +12,16 @@ Hazmat is an open-source replacement for [Gas Mask](https://github.com/2ndalpha/
 
 ## Status
 
-Early, but applying works. The composition and block-rendering core resolves a
+Applying and switching work. The composition and block-rendering core resolves a
 profile into a managed block and splices it into `/etc/hosts` byte-preservingly,
-and an approved daemon installs or removes that block. A minimal window lists the
-store's profiles, reports drift, and offers apply, overwrite, and remove.
+and an approved daemon installs or removes that block. A window lists the store's
+profiles and reports drift; a menu bar item names the active profile, switches
+between profiles, offers a deliberate overwrite for a block no profile owns, and
+turns the block off. The active profile is derived from the file's bytes, so an
+edit made by another tool is reported as drift rather than overwritten.
 
-Still to come: profile editing, the resolved view, the menu bar switcher, and
-packaging. The daemon accepts finished bytes only, and the store stays the source
-of truth.
+Still to come: profile editing, the resolved view, and packaging. The daemon
+accepts finished bytes only, and the store stays the source of truth.
 
 ## License
 

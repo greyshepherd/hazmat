@@ -32,16 +32,53 @@ final class PackagePurityTests: XCTestCase {
         XCTAssertNotEqual(getuid(), 0, "the suite must run as a non-root user")
     }
 
+    func testThePrivilegedWriterAsksForExactlyTwoThings() throws {
+        let source = try String(contentsOf: repositoryRoot().appendingPathComponent("Sources/HazmatCore/PrivilegedWriter.swift"), encoding: .utf8)
+
+        XCTAssertEqual(source.components(separatedBy: "func ").count - 1, 2, source)
+        XCTAssertTrue(source.contains("func write(bytes: Data, baseline: Data)"), source)
+        XCTAssertTrue(source.contains("func removeBlock(baseline: Data)"), source)
+    }
+
+    func testTheXPCInterfaceCarriesNoMethodThisChangeAdded() throws {
+        let source = try String(contentsOf: repositoryRoot().appendingPathComponent("Sources/HazmatProtocol/HazmatIdentity.swift"), encoding: .utf8)
+        let body = try XCTUnwrap(
+            source.components(separatedBy: "protocol HazmatDaemonXPC {").last?.components(separatedBy: "\n}").first
+        )
+
+        XCTAssertEqual(body.components(separatedBy: "func ").count - 1, 2, body)
+        XCTAssertTrue(body.contains("func writeFileBytes("), body)
+        XCTAssertTrue(body.contains("func removeManagedBlock("), body)
+    }
+
+    func testThePrivilegedSideStillKnowsNothingAboutProfilesOrTheMenu() throws {
+        let sources = try sources(in: "Sources/HazmatPrivileged")
+        XCTAssertFalse(sources.isEmpty, "the privileged target has no sources")
+
+        for (file, source) in sources {
+            for needle in ["ProfileID", "MenuPresentation", "ActiveProfile", "Activation", "ShellModel"] {
+                XCTAssertNil(source.range(of: needle), "\(file) contains \(needle)")
+            }
+        }
+    }
+
     private func librarySources() throws -> [(String, String)] {
-        let root = URL(fileURLWithPath: #filePath)
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .deletingLastPathComponent()
-            .appendingPathComponent("Sources/HazmatCore")
+        try sources(in: "Sources/HazmatCore")
+    }
+
+    private func sources(in relativePath: String) throws -> [(String, String)] {
+        let root = repositoryRoot().appendingPathComponent(relativePath)
         return try FileManager.default
             .contentsOfDirectory(at: root, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "swift" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
             .map { ($0.lastPathComponent, try String(contentsOf: $0, encoding: .utf8)) }
+    }
+
+    private func repositoryRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
     }
 }

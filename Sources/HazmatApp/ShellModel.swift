@@ -16,11 +16,13 @@ final class ShellModel {
     private(set) var notice = ""
     private(set) var storePath = ""
     private(set) var busy = false
+    private(set) var reading: ActiveProfileReading = .missingStore
     var selectedProfile: ProfileID?
 
     private let registration: HelperRegistration
     private let catalogue: ProfileCatalogue
     private let applier: HostsFileApplier
+    private let liveFile: LiveHostsFile
 
     init(
         storeRoot: URL = StoreLocation.defaultRoot,
@@ -30,14 +32,30 @@ final class ShellModel {
         registration = HelperRegistration()
         catalogue = ProfileCatalogue(root: storeRoot)
         applier = HostsFileApplier(fileURL: fileURL, writer: writer ?? DaemonClient())
+        liveFile = LiveHostsFile(url: fileURL)
         storePath = storeRoot.path
     }
 
+    /// The menu bar item, derived from the last refresh. Presentation only: the
+    /// items come from app support.
+    var menu: MenuPresentation {
+        MenuPresentation(reading: reading, helper: helper, notice: notice)
+    }
+
     func refresh() {
-        helper = registration.state
-        profiles = catalogue.profiles()
+        // The menu rebuilds for every observable change, so the writes are
+        // guarded: an unchanged value must not notify observers and rebuild the
+        // menu that is being read.
+        let helperState = registration.state
+        if helperState != helper { helper = helperState }
+
+        let latest = catalogue.activation(reading: liveFile)
+        if latest != reading { reading = latest }
+        if latest.profiles != profiles { profiles = latest.profiles }
+
         if selectedProfile == nil || !profiles.contains(selectedProfile!) {
-            selectedProfile = profiles.first
+            let fallback = profiles.first
+            if fallback != selectedProfile { selectedProfile = fallback }
         }
         refreshDrift()
     }
@@ -63,20 +81,38 @@ final class ShellModel {
     }
 
     func refreshDrift() {
-        guard let profile = selectedProfile else {
-            drift = catalogue.exists ? "No profile selected." : "No store at \(catalogue.root.path)."
-            return
+        let updated: String
+        if let profile = selectedProfile {
+            do {
+                updated = Self.describe(try applier.state(rendered: try catalogue.renderedBlock(for: profile)))
+            } catch {
+                updated = "The file could not be read: \(error)"
+            }
+        } else {
+            updated = catalogue.exists ? "No profile selected." : "No store at \(catalogue.root.path)."
         }
-        do {
-            let state = try applier.state(rendered: try catalogue.renderedBlock(for: profile))
-            drift = Self.describe(state)
-        } catch {
-            drift = "The file could not be read: \(error)"
-        }
+        if updated != drift { drift = updated }
     }
 
     func apply(overwriteDrift: Bool) {
         guard let profile = selectedProfile else { return }
+        activate(profile, overwriteDrift: overwriteDrift)
+    }
+
+    /// Activates a profile from the store. The live file is read again rather
+    /// than trusting the menu's look: a block that changed since then must not be
+    /// replaced unless it still belongs to a profile.
+    func activate(_ profile: ProfileID) {
+        let fresh = catalogue.activation(reading: liveFile)
+        activate(profile, overwriteDrift: fresh.replacingIsASwitch)
+    }
+
+    /// Replaces a block no profile owns, which the menu offered as its own item.
+    func overwriteDrift(with profile: ProfileID) {
+        activate(profile, overwriteDrift: true)
+    }
+
+    private func activate(_ profile: ProfileID, overwriteDrift: Bool) {
         let catalogue = self.catalogue
         let applier = self.applier
         busy = true
@@ -108,7 +144,7 @@ final class ShellModel {
     private func finish(_ outcome: ApplyOutcome) {
         busy = false
         notice = outcome.description
-        refreshDrift()
+        refresh()
     }
 
     static func describe(_ state: BlockState) -> String {
