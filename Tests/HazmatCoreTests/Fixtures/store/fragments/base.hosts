@@ -1,0 +1,5 @@
+# Base overrides shared by every profile.
+127.0.0.1	localhost hazmat.local
+127.0.0.1	api.internal
+::1	api.internal
+10.0.0.5	legacy.example.com

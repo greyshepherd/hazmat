@@ -1,0 +1,7 @@
+# >>> hazmat:managed v1 >>>
+127.0.0.1 localhost hazmat.local
+::1 api.internal
+127.0.0.1 api.internal api
+::1 localhost
+0.0.0.0 ads.example.com telemetry.example.com
+# <<< hazmat:managed v1 <<<

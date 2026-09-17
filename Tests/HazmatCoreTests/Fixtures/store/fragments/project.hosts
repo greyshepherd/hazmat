@@ -1,0 +1,5 @@
+# Project-specific overrides for the work profile.
+127.0.0.1	api.internal api
+::1	localhost
+# hazmat:remove legacy.example.com
+10.4.0.9	docs.internal

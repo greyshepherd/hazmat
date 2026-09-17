@@ -1,0 +1,3 @@
+# Names this profile blocks.
+0.0.0.0	ads.example.com telemetry.example.com
+# hazmat:remove docs.internal
