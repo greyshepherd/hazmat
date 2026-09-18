@@ -31,10 +31,16 @@ a bundle and the feed it checks cannot disagree.
 
 ## The pinned tools
 
-`release/sparkle.json` pins the Sparkle distribution the release tooling uses, and
-its checksum. `Scripts/sparkle-tools.sh` downloads it, verifies it against the
-checksum, and refuses anything that does not match before a tool from it runs.
-Nothing else fetches a binary.
+`release/sparkle.json` names the Sparkle distribution the release tooling uses:
+`version` and `url` are the release it fetches, and `sha256` is the digest it
+checks the download against. Nothing else fetches a binary.
+
+`Scripts/sparkle-tools.sh` downloads it, verifies it against the checksum, and
+refuses anything that does not match before a tool from it runs. It prints the
+directory holding the tools, and the other scripts take the path from it rather
+than fetching anything themselves. `Scripts/appcast-entry.sh` uses the signing
+tool from it to sign one archive and print the feed item for it; the publish step
+calls that script rather than duplicating the entry.
 
 The pin and the version `Package.swift` resolves must agree: the framework the
 bundle embeds and the tools that sign the archive come from the same release, and
@@ -101,9 +107,11 @@ checks that the image answers at its address, and only then writes the feed entr
 naming it and pushes the feed. An entry is never readable before the archive it
 names.
 
-The token comes from the environment: `HAZMAT_GITHUB_TOKEN`, or `GITHUB_TOKEN`. A
-run without one stops before it uploads anything. `--dry-run` reports what would
-be published without touching the repository.
+The token comes from the environment: `HAZMAT_GITHUB_TOKEN`, or `GITHUB_TOKEN`. It
+needs to be able to create releases in the repository the configuration names and
+to push to the branch the feed is served from, which a token with `repo` scope
+covers. A run without one stops before it uploads anything. `--dry-run` reports
+what would be published without touching the repository.
 
 The feed is committed on the branch the configuration names and pushed to origin.
 The run refuses when the working tree is not on that branch, or holds anything but
@@ -114,7 +122,8 @@ the feed, so a publish cannot carry unrelated work with it.
 Once, before the first release:
 
 1. **Generate the signing key.** The private key is an EdDSA key in the login
-   keychain and never enters the repository.
+   keychain — service `https://sparkle-project.org`, account `ed25519` — and
+   never enters the repository. The public half lives in `update.publicKey`.
 
    ```
    "$(Scripts/sparkle-tools.sh)/generate_keys"
@@ -145,6 +154,30 @@ Once, before the first release:
 Then walk the sequence once against a throwaway version: set `shortVersion` and
 `buildNumber`, run `Scripts/release.sh`, then `Scripts/publish.sh --dry-run`, then
 the publish itself. That exercises every gate before the version anyone keeps.
+
+## What is secret, and where it lives
+
+Nothing here writes a credential to a file in the repository. This is the whole
+inventory, and each entry names what losing it costs.
+
+| Secret | Where it lives | If it is lost |
+| --- | --- | --- |
+| The EdDSA key that signs archives | The login keychain, service `https://sparkle-project.org`, account `ed25519`. Its public half is committed in `update.publicKey` | A rotation, which the framework only permits while the code-signing certificate stays the same — so the backup is the real protection |
+| The Developer ID certificate and its private key | The login keychain, as a codesigning identity. `HAZMAT_SIGN_IDENTITY` names one when the keychain holds several | A new certificate issued to the same team. The privileged side requires the team rather than a particular certificate, so an installed copy can still be updated |
+| The App Store Connect API key (`.p8`) | `~/.appstoreconnect/private_keys`, or wherever `HAZMAT_NOTARY_KEY` points. The ignore rules refuse `*.p8` and `AuthKey_*` so one cannot be staged by accident | Download another key from App Store Connect; nothing in the repository changes |
+| The notarization credential | A `notarytool` keychain profile, or the environment. It is either the API key above or an Apple ID and an app-specific password | Regenerate an app-specific password, or make another key |
+| The GitHub token | The environment only — `HAZMAT_GITHUB_TOKEN` or `GITHUB_TOKEN`. No script writes it anywhere | Issue another token |
+
+Everything else is public and belongs in the repository: the release
+configuration, the update public key, the feed, the signing identity's name, and
+the archives themselves. The signature in a feed entry is over the archive's
+bytes and is verified with the committed public key, so it carries no secret.
+
+Two things are worth stating because they are easy to get wrong. A key file is a
+private key: it belongs beside your other credentials, never in a working tree,
+even one the ignore rules cover. And the update key and the code-signing identity
+are separate — the first proves an archive is the one this project signed, the
+second proves who built the app — so losing one is not losing the other.
 
 ## Accepting an upgrade
 

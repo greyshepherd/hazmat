@@ -21,8 +21,10 @@ state it is in: no store, no profiles, a profile with no layers, changes pending
 in sync, or a blocked write. Applying is a review step: a confirmation names the
 file and the entry count, the block it replaced is kept so the change can be
 reverted, and overwriting drift or removing the block is confirmed as
-destructive. The store's location is choosable in Settings, with the environment
-override still authoritative. A menu bar item carries the mark alone, with the
+destructive. The store's location is choosable in Settings, and `HAZMAT_STORE_ROOT`
+names it from the environment instead, where it is authoritative over the choice
+made in the window — which is what keeps a development or test store apart from
+the real one. A menu bar item carries the mark alone, with the
 state in its accessibility label and its menu: the menu marks the active profile,
 switches between profiles, offers a deliberate overwrite for a block no profile
 owns, turns the block off, and opens or quits the application. Closing the window
