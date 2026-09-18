@@ -2,7 +2,8 @@
 
 All notable changes to Hazmat are listed here, newest first. Each release
 carries a higher build number than the one before it; published versions are
-never rewritten.
+never rewritten. A published version's section is what its release page carries,
+so it is not rewritten either — the next version says what changed.
 
 ## 1.1.0 — 2026-09-19
 

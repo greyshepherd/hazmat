@@ -48,6 +48,11 @@ the test suite fails when they drift.
 
 ## Cutting a release
 
+The configuration's `shortVersion` and `buildNumber` name what is being cut, and
+`CHANGELOG.md` carries a section for that version: it is the notes the release page
+will show. Both are set before the bundle is built, so the artifact and the page
+describe the same release.
+
 ```
 Scripts/release.sh
 ```
@@ -80,6 +85,9 @@ The API key is the better of the two: it is scoped to notarization, revocable on
 own, and needs no app-specific password. An individual key carries no issuer; a
 team key must carry one, and a team key used without its issuer fails as
 `401 Unauthenticated` — which reads like a bad key rather than a missing argument.
+Both identifiers are on App Store Connect's Users and Access, under Integrations:
+the key ID is the name the downloaded `.p8` carries, and the issuer ID is the
+team's own identifier above the keys.
 
 When `iCloud Keychain` is on, `store-credentials` may write the profile to the
 synced keychain, where a later `--keychain-profile` lookup does not authenticate
@@ -115,8 +123,7 @@ The release page carries the changelog: the release body is the section
 `CHANGELOG.md` holds for the version being published, so the page and the file
 cannot say different things. A version the changelog does not carry stops the run
 before anything is tagged, and a release whose notes are not the changelog's names
-its own file with `--notes <path>`. Set `shortVersion`, `buildNumber` and that
-section before the run.
+its own file with `--notes <path>`.
 
 The token comes from the environment: `HAZMAT_GITHUB_TOKEN`, or `GITHUB_TOKEN`. It
 needs to be able to create releases in the repository the configuration names and
