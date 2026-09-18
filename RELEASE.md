@@ -26,6 +26,13 @@ pinned Sparkle tools, the one-time setup a first release needs, the inventory
 of what is secret and where it lives, and the upgrade an installed copy must
 be shown to accept.
 
+Three consumers follow a release. Installed copies read the feed, the release
+page carries the image, and the Homebrew tap at
+[greyshepherd/homebrew-tap](https://github.com/greyshepherd/homebrew-tap) reads
+the newest release once a day and bumps its cask to it, so `brew install --cask
+hazmat` names the newest published build. The order is the same in every case:
+the bump follows the release, never the other way round.
+
 Versions are never rewritten: a bad release is corrected by publishing a
 higher build number, and a tag that already names a commit is refused rather
 than moved.

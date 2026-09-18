@@ -13,7 +13,7 @@
 
 Hazmat keeps named profiles of hosts entries — local development overrides, a
 tracker blocklist, a staging environment — and switches between them from the
-menu bar. It is an open-source replacement for
+menu bar. It is inspired from
 [Gas Mask](https://github.com/2ndalpha/gasmask), written from scratch for
 Apple Silicon.
 
@@ -21,25 +21,23 @@ Apple Silicon.
   <img src="Assets/screenshot.png" alt="The Hazmat window: profiles and fragments on the left, the work profile's two layers in the middle, and the 46 entries they resolve to on the right" width="85%">
 </p>
 
+**Disclaimer**: This codebase was built entirely by pairing with an AI agent — no code was handwritten by a human.
+
 ## Features
 
 - **Profiles and fragments.** A profile is an ordered list of fragments —
   reusable blocks of entries shared between profiles. Later layers win
-  conflicts, so a one-line override can sit on top of a 45-entry blocklist.
+  conflicts.
 - **Menu bar switcher.** The menu bar shows the current state at a glance and
-  switches profiles without opening a window. Closing the window leaves Hazmat
-  in the menu bar.
+  switches profiles without opening a window.
 - **See it before it lands.** The window shows a profile's layers and the
   exact block they resolve to — as text or a table — before anything is
   written to `/etc/hosts`.
 - **Applying is a review step.** A confirmation names the file and the entry
-  count, the block it replaces is kept so the change can be reverted, and
-  overwriting an edit made by another tool is confirmed as destructive.
+  count, the block it replaces is kept so the change can be reverted.
 - **Drift detection.** The active profile is read back from the file's bytes,
   so an edit made outside Hazmat is reported as drift rather than silently
   overwritten.
-- **Signed updates.** Releases are signed, notarized, and stapled; installed
-  copies check for newer builds and update from inside the app.
 
 ## How it works
 
@@ -56,17 +54,6 @@ restores the rest of the file exactly as it was.
 
 - A Mac with Apple silicon
 - macOS 15 (Sequoia) or later
-
-## Installing
-
-Download the disk image from
-[the latest release](https://github.com/greyshepherd/hazmat/releases/latest),
-open it, and drag Hazmat to your Applications folder. On first apply, Hazmat
-offers to install its helper — the one step that needs your password, and the
-only thing that gives it permission to write `/etc/hosts`.
-
-Updates are offered from the app's menu bar menu once a newer build is
-published.
 
 ## Documentation
 
