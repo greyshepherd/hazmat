@@ -13,7 +13,7 @@
 - [x] 2.2 Give the assembler a mode that reports the identity and version it would write without building. Verify a test compares that output with the identity the code declares, and that the test fails when either side is edited alone
 - [x] 2.3 Verify the bundle is self-contained: the assembled executables' library references resolve inside the bundle or to a system path, and the assembler refuses an assembly that would reference anything else. Verify by inspecting both executables and by making the check fail deliberately
 - [x] 2.4 Verify the daemon's property list is lint-valid and names the label, the executable, and the mach service the code declares, and that the app registering it reads a state other than not-found when the bundle is assembled. Verify by linting the file and by running the assembled app and reading the helper state in the window
-- [ ] 2.5 Verify the development shape is unchanged in behaviour: run the app from an assembled debug bundle and confirm the window, the status item's menu, and an apply all work as they did before, with the existing test suite passing
+- [ ] 2.5 Verify the development shape is unchanged in behaviour: run the app from an assembled debug bundle and confirm the window, the status item's menu, and an apply all work as they did before, with the existing test suite passing. Verified so far: the debug bundle assembles, verifies, and launches, the window opens, and the status item's accessibility label reads `Hazmat: off` with the profiles, `Turn Hazmat Off`, `Open Hazmat` and `Quit Hazmat` in its menu; an apply needs the helper registered and approved from the bundle, which is unchecked below
 
 ## 3. The mark in the status item
 
@@ -26,8 +26,8 @@
 - [x] 4.1 Add the update framework as a dependency of the app target only. Verify the core, protocol, privileged, and app-support targets still build and pass their purity and isolation tests without it
 - [x] 4.2 Declare the update-checking protocol in app support, carry the check as an item in the menu presentation that is present only when the bundle declares a feed, and forward the choice from the model. Verify tests cover: a bundle with a feed offers the check; a bundle without one does not; a refused check is reported with its reason
 - [x] 4.3 Implement the adapter in the app on the framework's standard controller, reading the feed and the public key from the bundle. Verify a release bundle's property list declares both and a debug bundle declares neither, and that the app launches with the framework embedded
-- [ ] 4.4 Verify a manual check runs from the menu against a test feed and reports its outcome, and that a check whose feed is unreachable reports a failure with a reason rather than failing silently
-- [ ] 4.5 Offer the check in the application menu as well, driven by the same presentation, and verify it is absent or disabled in a bundle that declares no feed
+- [ ] 4.4 Verify a manual check runs from the menu against a test feed and reports its outcome, and that a check whose feed is unreachable reports a failure with a reason rather than failing silently. The test feed needs the published feed to exist, so this waits on 8.4
+- [x] 4.5 Offer the check in the application menu as well, driven by the same presentation, and verify it is absent or disabled in a bundle that declares no feed; verified: a release-shaped bundle's application menu shows `Check for Updates…` before the settings item, a development bundle shows none, and the commands scene renders the model's one menu value rather than rebuilding it
 
 ## 5. The daemon's requirement and its lifetime
 
@@ -38,7 +38,7 @@
 
 ## 6. Signing, notarization, and the disk image
 
-- [ ] 6.1 Sign the release bundle inside out — the framework's services and helpers, the framework, the daemon with its own identifier, then the app — with a secure timestamp and the hardened runtime, without a deep or recursive flag. Verify a strict verification including nested code passes and that every nested item reports the release identity
+- [x] 6.1 Sign the release bundle inside out — the framework's services and helpers, the framework, the daemon with its own identifier, then the app — with a secure timestamp and the hardened runtime, without a deep or recursive flag. Verified: the assembled release bundle passes `codesign --verify --strict` and the same check including nested code, every nested item reports team BHY3LCR536, the app reports its own identifier under the hardened runtime with a secure timestamp, and the daemon reports `com.greyshepherd.hazmat.daemon`
 - [ ] 6.2 Build the disk image holding the app and a link to the applications folder, staple the app before building, notarize and staple the image. Verify the system's assessment accepts the image and the app, and that the ticket validates with no network
 - [ ] 6.3 Orchestrate the release so that it verifies the artifacts, refuses a wrong version, and stops on a missing identity, a missing notarization credential, or a failed notarization, naming the submission and the reason. Verify each refusal by running the release without that input
 - [ ] 6.4 Verify the image installs on an account that has never seen the app: Gatekeeper accepts it, the app launches, the helper can be registered from where the app is installed, and the helper's state reads as answering rather than only as approved
@@ -46,15 +46,15 @@
 ## 7. The feed and its key
 
 - [ ] 7.1 Generate the update signing key once with the pinned distribution's tool, record the public key in the release configuration, and confirm the private key is not in the repository. Verify with a repository-wide search and by listing the keychain item
-- [ ] 7.2 Pin the distribution's version and checksum in the release tooling and verify the download against it. Verify a tampered download is refused before any tool runs
-- [ ] 7.3 Generate the feed entry for a release archive. Verify the entry states the build number, short version, archive address and length, signature, publication time, minimum system version, and the Apple silicon requirement, and that it links release notes
-- [ ] 7.4 Verify the ordering rules: an archive is readable at its published address before any entry naming it, and a build number that is not greater than the published maximum is refused, leaving the feed unchanged
+- [x] 7.2 Pin the distribution's version and checksum in the release tooling and verify the download against it. Verified: `release/sparkle.json` pins the distribution and its SHA-256, the test suite fails when the pin and the framework `Package.swift` resolves disagree, and a cached archive whose bytes do not match the pin is refused and deleted before a tool from it runs
+- [x] 7.3 Generate the feed entry for a release archive. Verified: the entry parsed as XML states `sparkle:version`, `sparkle:shortVersionString`, `sparkle:pubDate`, `sparkle:minimumSystemVersion`, `sparkle:hardwareRequirements` of `arm64`, and a `sparkle:releaseNotesLink` naming the release, and its enclosure carries the archive's address, its byte length, and the EdDSA signature over its bytes
+- [x] 7.4 Verify the ordering rules: an archive is readable at its published address before any entry naming it, and a build number that is not greater than the published maximum is refused, leaving the feed unchanged. Verified: the publish step checks the archive answers at its address before it writes the entry, and a build number equal to or smaller than the greatest the feed carries is refused with nothing written
 
 ## 8. Publishing
 
 - [ ] 8.1 Write the publish step: create the release, upload the disk image to it, then write the feed and push it, with the repository, the tag prefix and the feed's path read from the release configuration and the token from the environment. Verify the archive answers at its release address before the feed naming it is readable, and measure the lifetime the feed is served with rather than assuming it
-- [ ] 8.2 Verify the publish step reads the published feed first and refuses a build number equal to or smaller than the published maximum
-- [ ] 8.3 Verify a publish with no token stops before uploading and names what is missing
+- [x] 8.2 Verify the publish step reads the published feed first and refuses a build number equal to or smaller than the published maximum; verified: a feed carrying build 4 refuses a publish of build 1, and one carrying build 7 refuses it too, each naming the number the feed already holds
+- [x] 8.3 Verify a publish with no token stops before uploading and names what is missing; verified: a run with no token in the environment stops and names `HAZMAT_GITHUB_TOKEN` before it creates a release
 - [ ] 8.4 Enable Pages for the repository from the branch and directory the configuration names, and verify the feed's address answers over HTTPS with the published file
 
 ## 9. Acceptance against a real upgrade
@@ -65,6 +65,6 @@
 
 ## 10. Documentation and the guard
 
-- [ ] 10.1 Rescope the isolation guard: no packaging, signing, or update vocabulary in the core, protocol, privileged, or app-support targets, and the update framework's name only in the adapter that implements the update protocol. Verify the suite passes and that a deliberate violation in each guarded target is caught
-- [ ] 10.2 Update the README: the status, how to build and run a development bundle, how to cut a release, the feed address, and how the signing key is stored and backed up. Verify a reader can follow it to assemble a development bundle and to start a release
-- [ ] 10.3 Document the one-time setup a first release needs — notarization credentials, key generation and backup, the repository being public, Pages being enabled on the branch and directory the configuration names, and the credentials the publish step reads — and walk the sequence once against a throwaway version to confirm the steps are complete. Note that the helper's registration names the bundle it was registered from, so an app that has moved has to be registered again from where it now lives
+- [x] 10.1 Rescope the isolation guard: no packaging, signing, or update vocabulary in the core, protocol, privileged, or app-support targets, and the update framework's name only in the adapter that implements the update protocol. Verified: the suite passes, a notarization word added to the core fails the vocabulary guard, and the framework's name added to another app file fails the adapter guard
+- [x] 10.2 Update the README: the status, how to build and run a development bundle, how to cut a release, the feed address, and how the signing key is stored and backed up. Verified: the README states the status, assembles a development bundle, names `Scripts/release.sh` and `Scripts/publish.sh`, gives the feed address, and points at `release/README.md` for the key
+- [ ] 10.3 Document the one-time setup a first release needs — notarization credentials, key generation and backup, the repository being public, Pages being enabled on the branch and directory the configuration names, and the credentials the publish step reads — and walk the sequence once against a throwaway version to confirm the steps are complete. Documented in `release/README.md`; the walk-through is unchecked because it needs the key and the credentials Note that the helper's registration names the bundle it was registered from, so an app that has moved has to be registered again from where it now lives
