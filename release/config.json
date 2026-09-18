@@ -4,7 +4,7 @@
   "teamIdentifier": "BHY3LCR536",
   "update": {
     "feedURL": "https://greyshepherd.github.io/hazmat/appcast.xml",
-    "publicKey": "",
+    "publicKey": "3A8opAzwxw/lH8PsTgYlBbJ5GzNdUVEWnyHiV/HR98o=",
     "releaseRepo": "greyshepherd/hazmat",
     "tagPrefix": "v",
     "feedPath": "docs/appcast.xml",
