@@ -15,5 +15,8 @@ a bundle and the feed it checks cannot disagree.
   development bundle declares nothing, and therefore offers no update check.
 - `update.publicKey` — the base64 EdDSA key the app verifies archives against. It
   is empty until the key is generated; a release refuses to assemble without it.
-- `update.bucket`, `update.assetPrefix` — where the publish step puts the appcast
-  and the archives.
+- `update.releaseRepo`, `update.tagPrefix` — the repository a release is published
+  to, and the tag prefix its releases are named with. Archives are release assets,
+  so they are served from the release, not from the repository.
+- `update.feedPath` — where the appcast is written in that repository, which is the
+  directory GitHub Pages serves.

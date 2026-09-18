@@ -62,8 +62,9 @@ final class PackagingTests: XCTestCase {
         let feedURL = try XCTUnwrap(URL(string: try XCTUnwrap(update["feedURL"] as? String, "feedURL")))
         XCTAssertEqual(feedURL.scheme, "https")
         XCTAssertEqual(feedURL.pathExtension, "xml")
-        XCTAssertFalse(try XCTUnwrap(update["bucket"] as? String, "bucket").isEmpty)
-        XCTAssertNotNil(update["assetPrefix"] as? String, "assetPrefix")
+        XCTAssertFalse(try XCTUnwrap(update["releaseRepo"] as? String, "releaseRepo").isEmpty)
+        XCTAssertNotNil(update["tagPrefix"] as? String, "tagPrefix")
+        XCTAssertNotNil(update["feedPath"] as? String, "feedPath")
         // Empty until the signing key is generated; a release refuses without it.
         XCTAssertNotNil(update["publicKey"] as? String, "publicKey")
     }

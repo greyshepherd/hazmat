@@ -3,9 +3,10 @@
   "buildNumber": 1,
   "teamIdentifier": "BHY3LCR536",
   "update": {
-    "feedURL": "https://updates.greyshepherd.com/appcast.xml",
+    "feedURL": "https://greyshepherd.github.io/hazmat/appcast.xml",
     "publicKey": "",
-    "bucket": "hazmat-updates",
-    "assetPrefix": "releases"
+    "releaseRepo": "greyshepherd/hazmat",
+    "tagPrefix": "v",
+    "feedPath": "docs/appcast.xml"
   }
 }

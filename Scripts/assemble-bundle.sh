@@ -131,8 +131,7 @@ BUILD_NUMBER="$(config_value buildNumber)"
 TEAM_IDENTIFIER="$(config_value teamIdentifier)"
 FEED_URL="$(config_value update.feedURL)"
 PUBLIC_KEY="$(config_value update.publicKey)"
-BUCKET="$(config_value update.bucket)"
-ASSET_PREFIX="$(config_value update.assetPrefix)"
+RELEASE_REPO="$(config_value update.releaseRepo)"
 
 # The deployment floor is the one the package targets, not a second copy of it.
 PLATFORM_FLOOR="$(sed -n 's/.*\.macOS(\.v\([0-9][0-9]*\)).*/\1/p' "$PACKAGE" | sed -n '1p')"
@@ -167,7 +166,7 @@ validate_reporting() {
     fi
     if [ "$CONFIGURATION" = "release" ]; then
         [ -n "$TEAM_IDENTIFIER" ] || fail "a release needs a team identifier in $CONFIG"
-        [ -n "$BUCKET" ] || fail "a release needs a bucket in $CONFIG"
+        [ -n "$RELEASE_REPO" ] || fail "a release needs a repository to publish to in $CONFIG"
     fi
 }
 
