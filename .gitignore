@@ -37,9 +37,12 @@ Package.resolved
 Exports/
 
 # Secrets and local config
-*.xcconfig.local
 .env
 .env.local
+*.xcconfig.local
+# App Store Connect keys belong in ~/.appstoreconnect/private_keys, never here.
+*.p8
+AuthKey_*
 
 # Editor and tooling
 .vscode/
