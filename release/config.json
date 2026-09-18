@@ -7,6 +7,7 @@
     "publicKey": "",
     "releaseRepo": "greyshepherd/hazmat",
     "tagPrefix": "v",
-    "feedPath": "docs/appcast.xml"
+    "feedPath": "docs/appcast.xml",
+    "feedBranch": "main"
   }
 }

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The update feed. Scripts/publish.sh inserts one item per release, newest first,
+  and pushes this file; GitHub Pages serves it. Every value in an item comes from
+  release/config.json and the archive itself, so nothing here is stated twice.
+-->
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+  <channel>
+    <title>Hazmat</title>
+    <description>Hazmat releases</description>
+    <language>en</language>
+  </channel>
+</rss>
