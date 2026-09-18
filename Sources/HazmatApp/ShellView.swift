@@ -13,11 +13,13 @@ struct ShellView: View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(model: model)
         } content: {
+            // The layers pane opens at its minimum so the resolved block takes the
+            // room, and the divider widens it when a long layer list needs it.
             ContentPane(model: model)
-                .navigationSplitViewColumnWidth(min: 300, ideal: 300, max: 340)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 200)
         } detail: {
             DetailPane(model: model)
-                .navigationSplitViewColumnWidth(min: 320, ideal: 600)
+                .navigationSplitViewColumnWidth(min: 400, ideal: 600)
         }
         .navigationTitle("Hazmat")
         .searchable(
