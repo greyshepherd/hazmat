@@ -29,6 +29,7 @@ final class CommandPresentationTests: XCTestCase {
         helper: HelperState = .enabled,
         canRevert: Bool = false,
         hasUnsavedEdit: Bool = false,
+        update: UpdateAvailability = .unavailable,
         selection: SidebarSelection? = .profile(ProfileID("work"))
     ) -> CommandPresentation {
         let editor = fixture.model(writer: UnregisteredHelper()).read(selection: selection)
@@ -36,7 +37,8 @@ final class CommandPresentationTests: XCTestCase {
             editor: editor,
             helper: helper,
             canRevert: canRevert,
-            hasUnsavedEdit: hasUnsavedEdit
+            hasUnsavedEdit: hasUnsavedEdit,
+            update: update
         )
     }
 
@@ -62,11 +64,13 @@ final class CommandPresentationTests: XCTestCase {
         let fixture = try fixture()
         defer { fixture.remove() }
 
-        let actions = Set(commands(fixture).menus.flatMap(\.items).map(\.action))
+        // A bundle that declares a feed, so the one action a bundle without one is
+        // not offered is part of the set being checked.
+        let actions = Set(commands(fixture, update: .available).menus.flatMap(\.items).map(\.action))
         let expected: Set<WindowAction> = [
             .createStore, .chooseLocation, .newProfile, .newFragment, .apply, .revert, .overwriteDrift,
             .removeBlock, .reload, .rename, .duplicate, .delete, .save, .installHelper, .repairHelper,
-            .revealHostsFile, .openSettings, .toggleSidebar, .search, .showHelp
+            .revealHostsFile, .openSettings, .toggleSidebar, .search, .showHelp, .checkForUpdates
         ]
 
         XCTAssertEqual(actions, expected)
@@ -87,6 +91,48 @@ final class CommandPresentationTests: XCTestCase {
         XCTAssertEqual(commands.item("settings")?.shortcut?.display, "⌘,")
         XCTAssertEqual(commands.item("save")?.shortcut?.display, "⌘S")
         XCTAssertEqual(commands.item("toggle-sidebar")?.shortcut?.display, "⌃⌘S")
+    }
+
+    // MARK: - 4.5 The application menu's update check
+
+    func testTheApplicationMenuOffersTheCheckWhenTheBundleHasAFeed() throws {
+        let fixture = try fixture()
+        defer { fixture.remove() }
+        let commands = commands(fixture, update: .available)
+
+        XCTAssertEqual(
+            commands.menu("app")?.items.map(\.id), ["check-for-updates", "settings"],
+            "the check sits in the application menu, before the settings item"
+        )
+        XCTAssertEqual(commands.item("check-for-updates")?.action, .checkForUpdates)
+        XCTAssertEqual(commands.item("check-for-updates")?.title, "Check for Updates…")
+        XCTAssertTrue(commands.item("check-for-updates")?.isEnabled == true)
+    }
+
+    func testTheApplicationMenuOffersNoCheckWithoutAFeed() throws {
+        let fixture = try fixture()
+        defer { fixture.remove() }
+
+        // A development bundle, and a release whose framework could not start.
+        for availability in [UpdateAvailability.unavailable] {
+            let commands = commands(fixture, update: availability)
+            XCTAssertEqual(commands.menu("app")?.items.map(\.id), ["settings"])
+            XCTAssertNil(commands.item("check-for-updates"), "a bundle with no feed can only report that")
+            XCTAssertFalse(
+                commands.menus.flatMap(\.items).map(\.action).contains(.checkForUpdates),
+                "no menu may offer a check the bundle cannot make"
+            )
+        }
+    }
+
+    /// A check that failed is still a check this bundle can make, so it stays
+    /// offered: the failure is what the person needs to see and retry.
+    func testTheApplicationMenuStillOffersACheckThatFailed() throws {
+        let fixture = try fixture()
+        defer { fixture.remove() }
+        let commands = commands(fixture, update: .failed("the feed could not be reached"))
+
+        XCTAssertEqual(commands.item("check-for-updates")?.action, .checkForUpdates)
     }
 
     func testTheActionsThatActOnTheSelectionAreOffWithoutOne() throws {

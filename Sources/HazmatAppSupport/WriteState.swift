@@ -27,6 +27,9 @@ public enum WindowAction: Equatable, Sendable {
     case toggleSidebar
     case search
     case showHelp
+    /// Asks the update channel whether a newer version exists. Only a bundle that
+    /// declares a feed offers it.
+    case checkForUpdates
 
     /// Whether performing it asks the window for something: a name, a
     /// confirmation, a sheet, or the search field.
@@ -36,7 +39,7 @@ public enum WindowAction: Equatable, Sendable {
              .apply, .revert, .overwriteDrift, .removeBlock, .rename, .duplicate, .delete,
              .save, .installHelper, .search, .showHelp:
             return true
-        case .reload, .repairHelper, .revealHostsFile, .openSettings, .toggleSidebar:
+        case .reload, .repairHelper, .revealHostsFile, .openSettings, .toggleSidebar, .checkForUpdates:
             return false
         }
     }
@@ -64,6 +67,7 @@ public enum WindowAction: Equatable, Sendable {
         case .toggleSidebar: return "Toggle Sidebar"
         case .search: return "Search"
         case .showHelp: return "Hazmat Help"
+        case .checkForUpdates: return "Check for Updates…"
         }
     }
 }

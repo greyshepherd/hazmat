@@ -66,11 +66,16 @@ public struct CommandPresentation: Equatable, Sendable {
     /// The menu bar for the state the window is in. An item that cannot act in
     /// this state is still listed, so the action stays discoverable, and is
     /// reported as disabled so nothing unusable appears to work.
+    ///
+    /// The update check is the exception: a bundle that declares no feed is offered
+    /// no check at all, because the only thing it could report is that it cannot
+    /// check.
     public static func menuBar(
         editor: EditorPresentation,
         helper: HelperState,
         canRevert: Bool,
-        hasUnsavedEdit: Bool
+        hasUnsavedEdit: Bool,
+        update: UpdateAvailability = .unavailable
     ) -> CommandPresentation {
         let hasSelection = editor.selection != nil
         let holdsABlock = editor.live.holdsABlock
@@ -93,10 +98,16 @@ public struct CommandPresentation: Equatable, Sendable {
             )
         }
 
+        // The application menu, in the order the platform puts them: the check
+        // before the settings item it sits beside.
+        var application: [Item] = []
+        if update != .unavailable {
+            application.append(item("check-for-updates", "Check for Updates…", .checkForUpdates))
+        }
+        application.append(item("settings", "Settings…", .openSettings, Shortcut(",", .command)))
+
         let menus = [
-            Menu(id: "app", title: "Hazmat", items: [
-                item("settings", "Settings…", .openSettings, Shortcut(",", .command))
-            ]),
+            Menu(id: "app", title: "Hazmat", items: application),
             Menu(id: "file", title: "File", items: [
                 item("new-profile", "New Profile", .newProfile, Shortcut("n", .command)),
                 item("new-fragment", "New Fragment", .newFragment, Shortcut("n", [.command, .shift])),

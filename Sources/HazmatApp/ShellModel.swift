@@ -218,7 +218,8 @@ final class ShellModel {
             editor: editor,
             helper: helper,
             canRevert: canRevert,
-            hasUnsavedEdit: fragmentIsDirty
+            hasUnsavedEdit: fragmentIsDirty,
+            update: updateAvailability
         )
     }
 
@@ -753,6 +754,7 @@ final class ShellModel {
         case .toggleSidebar: sidebarVisible.toggle()
         case .search: focusSearch()
         case .showHelp: showHelperSheet = true
+        case .checkForUpdates: checkForUpdates()
         }
     }
 

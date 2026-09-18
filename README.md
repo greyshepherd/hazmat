@@ -22,17 +22,24 @@ in sync, or a blocked write. Applying is a review step: a confirmation names the
 file and the entry count, the block it replaced is kept so the change can be
 reverted, and overwriting drift or removing the block is confirmed as
 destructive. The store's location is choosable in Settings, with the environment
-override still authoritative. A menu bar item names the active profile, switches
-between profiles, offers a deliberate overwrite for a block no profile owns, and
-turns the block off. The active profile is derived from the file's bytes, so an
-edit made by another tool is reported as drift rather than overwritten. Editing
-the store needs no privilege, and it stays inside the store.
+override still authoritative. A menu bar item carries the mark alone, with the
+state in its accessibility label and its menu: the menu marks the active profile,
+switches between profiles, offers a deliberate overwrite for a block no profile
+owns, turns the block off, and opens or quits the application. Closing the window
+leaves the application in the menu bar alone. The active profile is derived from
+the file's bytes, so an edit made by another tool is reported as drift rather
+than overwritten. Editing the store needs no privilege, and it stays inside the
+store.
 
-A bundle is assembled from one configuration: the app icon and the status item's
-mark come from the exported brand set, the version and the feed come from one
-file, and the update framework is embedded and signed with the rest. Still to
-come: a notarized release, and a published feed to point the update channel at.
 The daemon accepts finished bytes only, and the store stays the source of truth.
+It requires the team the running binary was signed with, so a distribution build
+cannot accept an ad-hoc client, and it stops after a period with no open
+connection so a replaced build cannot keep answering. The release path is
+complete: one assembler builds the development and release bundles from one
+configuration, `Scripts/release.sh` signs, notarizes, staples, and assesses the
+artifact, and `Scripts/publish.sh` uploads it and publishes the feed entry naming
+it. What is left is the one-time setup a first release needs, and the upgrade it
+is accepted by.
 
 ## Building
 
@@ -43,8 +50,19 @@ open build/Hazmat.app
 ```
 
 `Scripts/verify-bundle.sh build/Hazmat.app` reports what a bundle carries, what it
-reports, what it loads, and how it is signed. `release/README.md` describes the
-values a release reads.
+reports, what it loads, and how it is signed.
+
+## Releasing
+
+```
+Scripts/release.sh    # assemble, sign, notarize, staple, and assess
+Scripts/publish.sh --artifact build/release/Hazmat-1.0.0.dmg
+```
+
+`release/README.md` describes the configuration both steps read, the credentials
+they take from the environment, and the one-time setup a first release needs.
+Installed copies check `https://greyshepherd.github.io/hazmat/appcast.xml` for a
+newer build.
 
 ## License
 
