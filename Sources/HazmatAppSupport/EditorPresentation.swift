@@ -63,6 +63,35 @@ public enum ResolvedView: Equatable, Sendable {
     }
 }
 
+/// A profile as a sidebar row: how many layers it stacks, and whether its block
+/// is the live one.
+public struct ProfileRow: Equatable, Sendable, Identifiable {
+    public let profile: ProfileID
+    public let layerCount: Int
+    public let isApplied: Bool
+
+    public var id: ProfileID { profile }
+}
+
+/// A fragment as a sidebar row: the entries it holds.
+public struct FragmentRow: Equatable, Sendable, Identifiable {
+    public let fragment: FragmentID
+    public let entryCount: Int
+
+    public var id: FragmentID { fragment }
+}
+
+/// A layer of the selected profile: its position in the stack and the entries
+/// its fragment holds.
+public struct LayerRow: Equatable, Sendable, Identifiable {
+    public let fragment: FragmentID
+    /// One-based position in the stack.
+    public let position: Int
+    public let entryCount: Int
+
+    public var id: String { "\(position)-\(fragment.rawValue)" }
+}
+
 /// The window's whole state, read from the store and the live file when it is
 /// asked for. The scene renders this value and forwards choices.
 public struct EditorPresentation: Equatable, Sendable {
@@ -84,19 +113,63 @@ public struct EditorPresentation: Equatable, Sendable {
         case overwriteDrift(ProfileID, liveBlock: Data)
     }
 
+    /// What the content pane shows. The selected item wins: a store that holds
+    /// only fragments still edits the selected fragment, so no phase can hide
+    /// it. The phase fills the pane when nothing is selected.
+    public enum Content: Equatable, Sendable {
+        case fragment(FragmentID)
+        case profile(ProfileID)
+        case phase(WindowPhase)
+    }
+
+    /// The item the content pane edits, or the phase when there is nothing to
+    /// edit.
+    public func content(phase: WindowPhase) -> Content {
+        switch selection {
+        case .fragment(let fragment): return .fragment(fragment)
+        case .profile(let profile): return .profile(profile)
+        case nil: return .phase(phase)
+        }
+    }
+
     /// Where the store lives, for the window to name.
     public let storePath: String
+    /// The live file, so a confirmation can name what it would write.
+    public let hostsFilePath: String
     public let storeExists: Bool
+    /// Everything the store holds, whether or not the search matches it.
     public let profiles: [ProfileID]
     public let fragments: [FragmentID]
+    /// The profiles the search matched, in sidebar order.
+    public let profileRows: [ProfileRow]
+    /// The fragments the search matched, in sidebar order.
+    public let fragmentRows: [FragmentRow]
+    /// The profile the window acts on: the selected one, or the first the
+    /// search matched.
     public let selectedProfile: ProfileID?
+    /// The fragment the window acts on: the selected one, or the first the
+    /// search matched.
     public let selectedFragment: FragmentID?
+    /// What the content pane edits. `nil` when a search hid the selection.
+    public let selection: SidebarSelection?
+    /// The selection a search hid, so the window can say which item it was.
+    public let hiddenSelection: SidebarSelection?
+    /// The search this read was narrowed by.
+    public let search: StoreSearch
     /// The selected fragment's text, as the store holds it now.
     public let fragmentText: String
     /// The selected profile's references, in order.
     public let layers: [FragmentID]
+    /// The selected profile's layers, with their positions and entry counts.
+    public let layerRows: [LayerRow]
     /// The selected profile composed once, and rendered.
     public let resolved: ResolvedView
+    /// The block's entry lines: one row per address line the renderer writes.
+    public let entryLines: [BlockEntry]
+    /// The profiles whose stack references the selected fragment.
+    public let usingProfiles: [ProfileID]
+    /// The profiles whose rendering is the live block.
+    public let appliedProfiles: [ProfileID]
     /// What the live file holds for the selected profile's block.
     public let live: LiveBlockState
     /// Why the store could not be read, when it could not.
@@ -119,4 +192,20 @@ public struct EditorPresentation: Equatable, Sendable {
     /// The entries a later layer displaced, with the fragment that displaced
     /// them.
     public var displacements: [Displacement] { resolved.displacements }
+
+    /// How many entries the block would hold: one per address line.
+    public var entryCount: Int { entryLines.count }
+
+    /// How many layers the selected profile stacks.
+    public var layerCount: Int { layers.count }
+
+    /// The entries the fragment holds, as its row and its layer row show them.
+    public func entryCount(of fragment: FragmentID) -> Int? {
+        fragmentRows.first { $0.fragment == fragment }?.entryCount
+    }
+
+    /// Whether the given profile's block is the live one.
+    public func isApplied(_ profile: ProfileID) -> Bool {
+        appliedProfiles.contains(profile)
+    }
 }

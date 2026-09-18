@@ -79,22 +79,31 @@ public struct EditorModel: Sendable {
 
     // MARK: - Reading
 
-    /// Reads the store's profiles and fragments, the selected fragment's text,
-    /// the selected profile's layer list, and what the live file holds for it.
-    /// Nothing is cached, so a file another tool wrote appears in the next read.
-    public func read(profile: ProfileID? = nil, fragment: FragmentID? = nil) -> EditorPresentation {
+    /// Reads the store's profiles and fragments, the selected items' detail, and
+    /// what the live file holds. Nothing is cached, so a file another tool wrote
+    /// appears in the next read.
+    public func read(
+        selection: SidebarSelection? = nil,
+        search: StoreSearch = .none
+    ) -> EditorPresentation {
         let profiles = layout.profiles()
         let fragments = layout.fragments()
-        let selectedProfile = Self.selected(profile, in: profiles)
-        let selectedFragment = Self.selected(fragment, in: fragments)
+        let matchingProfiles = search.profiles(profiles)
+        let matchingFragments = search.fragments(fragments)
 
-        let fragmentText = selectedFragment
-            .flatMap { try? store.fragment(named: $0) }
-            .flatMap { $0 } ?? ""
+        let resolvedSelection = Self.resolve(selection, profiles: matchingProfiles, fragments: matchingFragments, searching: search.isActive)
+        let selectedProfile = resolvedSelection.selectedProfile ?? (selection == nil ? matchingProfiles.first : nil)
+        let selectedFragment = resolvedSelection.selectedFragment ?? (selection == nil ? matchingFragments.first : nil)
+
+        let selectedFragmentText = selectedFragment.flatMap { fragmentText(of: $0) } ?? ""
 
         var layers: [FragmentID] = []
-        if let selectedProfile, let text = (try? store.profile(named: selectedProfile)) ?? nil {
+        var layerRows: [LayerRow] = []
+        if let selectedProfile, let text = profileText(of: selectedProfile) {
             layers = ProfileParser.parse(text, as: selectedProfile).profile.references.map(\.fragment)
+            layerRows = layers.enumerated().map { index, fragment in
+                LayerRow(fragment: fragment, position: index + 1, entryCount: entryCount(of: fragment))
+            }
         }
 
         var storeProblem: String?
@@ -112,18 +121,37 @@ public struct EditorModel: Sendable {
             resolved = .unresolvable([])
         }
 
-        let live = liveState(rendering: resolved.renderedBlock)
+        let live = liveReading(rendering: resolved.renderedBlock, profiles: profiles)
+
         return EditorPresentation(
             storePath: layout.root.path,
+            hostsFilePath: fileURL.path,
             storeExists: layout.exists,
             profiles: profiles,
             fragments: fragments,
+            profileRows: matchingProfiles.map { profile in
+                ProfileRow(
+                    profile: profile,
+                    layerCount: layerCount(of: profile),
+                    isApplied: live.appliedProfiles.contains(profile)
+                )
+            },
+            fragmentRows: matchingFragments.map { fragment in
+                FragmentRow(fragment: fragment, entryCount: entryCount(of: fragment))
+            },
             selectedProfile: selectedProfile,
             selectedFragment: selectedFragment,
-            fragmentText: fragmentText,
+            selection: resolvedSelection.selection,
+            hiddenSelection: resolvedSelection.hidden,
+            search: search,
+            fragmentText: selectedFragmentText,
             layers: layers,
+            layerRows: layerRows,
             resolved: resolved,
-            live: live,
+            entryLines: resolved.composition.map(BlockRenderer.entries) ?? [],
+            usingProfiles: selectedFragment.map { profilesUsing($0, in: profiles) } ?? [],
+            appliedProfiles: live.appliedProfiles,
+            live: live.state,
             storeProblem: storeProblem,
             actions: Self.actions(
                 profiles: profiles,
@@ -131,42 +159,117 @@ public struct EditorModel: Sendable {
                 selectedProfile: selectedProfile,
                 selectedFragment: selectedFragment,
                 layers: layers,
-                live: live
+                live: live.state
             )
         )
     }
 
-    /// The live file read now, classified against the block the selected profile
-    /// renders now.
-    private func liveState(rendering: Data?) -> LiveBlockState {
+    /// What the sidebar's selection resolves to: which item the content pane
+    /// edits, and which selection a search hid. A selection that no longer
+    /// exists falls back to the first match; a selection the search hides
+    /// selects nothing rather than an item the sidebar is not showing.
+    private static func resolve(
+        _ selection: SidebarSelection?,
+        profiles: [ProfileID],
+        fragments: [FragmentID],
+        searching: Bool
+    ) -> (selection: SidebarSelection?, selectedProfile: ProfileID?, selectedFragment: FragmentID?, hidden: SidebarSelection?) {
+        switch selection {
+        case .profile(let profile):
+            if profiles.contains(profile) {
+                return (.profile(profile), profile, fragments.first, nil)
+            }
+            if searching {
+                return (nil, nil, fragments.first, .profile(profile))
+            }
+            if let fallback = profiles.first {
+                return (.profile(fallback), fallback, fragments.first, nil)
+            }
+            return (nil, nil, fragments.first, nil)
+        case .fragment(let fragment):
+            if fragments.contains(fragment) {
+                return (.fragment(fragment), profiles.first, fragment, nil)
+            }
+            if searching {
+                return (nil, profiles.first, nil, .fragment(fragment))
+            }
+            if let fallback = fragments.first {
+                return (.fragment(fallback), profiles.first, fallback, nil)
+            }
+            return (nil, profiles.first, nil, nil)
+        case nil:
+            if let profile = profiles.first {
+                return (.profile(profile), profile, fragments.first, nil)
+            }
+            if let fragment = fragments.first {
+                return (.fragment(fragment), nil, fragment, nil)
+            }
+            return (nil, nil, nil, nil)
+        }
+    }
+
+    private func fragmentText(of fragment: FragmentID) -> String? {
+        guard let text = try? store.fragment(named: fragment) else { return nil }
+        return text
+    }
+
+    private func profileText(of profile: ProfileID) -> String? {
+        guard let text = try? store.profile(named: profile) else { return nil }
+        return text
+    }
+
+    /// The entries the fragment holds, as its sidebar row reports them.
+    private func entryCount(of fragment: FragmentID) -> Int {
+        guard let text = fragmentText(of: fragment) else { return 0 }
+        return FragmentParser.parse(text, as: fragment).fragment.entries.count
+    }
+
+    private func layerCount(of profile: ProfileID) -> Int {
+        guard let text = profileText(of: profile) else { return 0 }
+        return ProfileParser.parse(text, as: profile).profile.references.count
+    }
+
+    private func profilesUsing(_ fragment: FragmentID, in profiles: [ProfileID]) -> [ProfileID] {
+        profiles.filter { profile in
+            guard let text = profileText(of: profile) else { return false }
+            return ProfileParser.parse(text, as: profile).profile.references.contains { $0.fragment == fragment }
+        }
+    }
+
+    /// The block a profile renders, or `nil` when it cannot be resolved.
+    public func renderedBlock(of profile: ProfileID) -> Data? {
+        guard let composition = try? composer.compose(profile: profile) else { return nil }
+        return BlockRenderer.render(composition)
+    }
+
+    /// The live file read once, classified against the block the selected
+    /// profile renders, with the profiles whose block is the live one. One read
+    /// answers both, so the sidebar's marks cost no second read.
+    private func liveReading(rendering: Data?, profiles: [ProfileID]) -> (state: LiveBlockState, appliedProfiles: [ProfileID]) {
         let live: Data
         do {
             live = try LiveHostsFile(url: fileURL).read()
         } catch {
-            return .unreadable(reason: "\(error)")
+            return (.unreadable(reason: "\(error)"), [])
         }
 
         let located: ManagedBlockLocation?
         do {
             located = try ManagedBlock.locate(in: live)
         } catch let error as BlockError {
-            return .refused(error)
+            return (.refused(error), [])
         } catch {
-            return .unreadable(reason: "\(error)")
+            return (.unreadable(reason: "\(error)"), [])
         }
 
-        guard let located else { return .absent }
+        guard let located else { return (.absent, []) }
         guard located.version == ManagedBlock.version else {
-            return .refused(.unsupportedVersion(found: located.version, expected: ManagedBlock.version))
+            return (.refused(.unsupportedVersion(found: located.version, expected: ManagedBlock.version)), [])
         }
         let block = Data(live[located.range])
-        if let rendering, block == rendering { return .applied }
-        return .drifted(liveBlock: block)
-    }
-
-    private static func selected<T: Equatable>(_ wanted: T?, in available: [T]) -> T? {
-        if let wanted, available.contains(wanted) { return wanted }
-        return available.first
+        let applied = profiles.filter { renderedBlock(of: $0) == block }
+        if let rendering, block == rendering { return (.applied, applied) }
+        return (.drifted(liveBlock: block), applied)
     }
 
     private static func actions(
@@ -264,14 +367,19 @@ public struct EditorModel: Sendable {
 
     /// Saves the fragment's text, then re-applies the profile when its block is
     /// live and is still the block that profile rendered before the edit.
+    /// `profile` is `nil` when the store holds none: the text is saved and there
+    /// is nothing to re-apply.
     @discardableResult
     public func save(
         fragment: FragmentID,
         text: String,
-        editing profile: ProfileID,
+        editing profile: ProfileID?,
         previous: EditorPresentation
     ) -> EditorOutcome {
-        writing(profile: profile, previous: previous) {
+        guard let profile else {
+            return plain { try storeWriter.save(text, asFragment: fragment) }
+        }
+        return writing(profile: profile, previous: previous) {
             try storeWriter.save(text, asFragment: fragment)
         }
     }
@@ -327,6 +435,64 @@ public struct EditorModel: Sendable {
     }
 
     // MARK: - The two write paths
+
+    /// Applies a profile's block, and reports what the apply did together with
+    /// what is needed to undo it: the block written, and the block it replaced
+    /// (`nil` when it installed where the file held none). Nothing is recorded
+    /// for an apply that did not write.
+    public func apply(
+        _ profile: ProfileID,
+        replacing replacement: Replacement
+    ) -> (outcome: ApplyOutcome, change: ApplyRecord?) {
+        let block: Data
+        do {
+            block = try BlockRenderer.render(composer.compose(profile: profile))
+        } catch {
+            return (.failed(reason: "rendering \(profile): \(error)"), nil)
+        }
+
+        let outcome = applier.apply(block: block, replacement: replacement)
+        guard outcome.isApplied else { return (outcome, nil) }
+
+        let replaced: Data?
+        switch replacement {
+        case .onlyIfAbsent: replaced = nil
+        case .block(let expected): replaced = expected
+        }
+        return (outcome, ApplyRecord(profile: profile, block: block, replaced: replaced))
+    }
+
+    /// Undoes an apply by replacing the block it wrote with the block it
+    /// replaced, or by removing the block when the apply installed it. The
+    /// apply's own byte-identity check refuses a revert once the live block is
+    /// no longer the block that apply wrote.
+    public func revert(_ change: ApplyRecord) -> ApplyOutcome {
+        let live: Data
+        do {
+            live = try LiveHostsFile(url: fileURL).read()
+        } catch {
+            return .failed(reason: "reading \(fileURL.path): \(error)")
+        }
+
+        let present: Data?
+        do {
+            if let located = try ManagedBlock.locate(in: live) {
+                present = Data(live[located.range])
+            } else {
+                present = nil
+            }
+        } catch let error as BlockError {
+            return .refused(.liveFile(error))
+        } catch {
+            return .refused(.liveFile(.invalidBlock("\(error)")))
+        }
+
+        guard present == change.block else { return .refused(.driftNotOverwritten) }
+        guard let replaced = change.replaced else {
+            return applier.removeBlock()
+        }
+        return applier.apply(block: replaced, replacement: .block(change.block))
+    }
 
     /// A store change that cannot reach the live file: authoring is unprivileged
     /// and needs no helper.

@@ -57,38 +57,72 @@ final class ShellIsolationTests: XCTestCase {
         }
     }
 
-    /// The editor scene renders the presentation and forwards choices: it names
-    /// no store, no composition, and no file path. The menu bar scene is held to
-    /// the same rule below.
+    /// Everything the window renders and forwards. A scene names no store, no
+    /// composition, and no file path; those arrive as presentation values.
+    private static let windowScenes = [
+        "ShellView.swift",
+        "SidebarView.swift",
+        "ContentPane.swift",
+        "DetailPane.swift",
+        "StatusRow.swift",
+        "HelperSheetView.swift",
+        "SettingsView.swift",
+        "ShellCommands.swift",
+        "StatusMark.swift",
+        "WindowViews.swift"
+    ]
+
+    private static let storeAndCompositionNames = [
+        "StoreLayout",
+        "StoreWriter",
+        "DirectoryStore",
+        "InMemoryStore",
+        "HostsStore",
+        "HostsComposer",
+        "Composition",
+        "BlockRenderer",
+        "ManagedBlock",
+        "LiveHostsFile",
+        "ProfileCatalogue",
+        "ProfileParser",
+        "EditorModel",
+        "HostsFileApplier",
+        "PrivilegedWriter",
+        "DaemonClient",
+        "ApplyOutcome",
+        "Replacement",
+        "FileManager",
+        "appendingPathComponent",
+        "Data(contentsOf",
+        "String(contentsOf",
+        "URL("
+    ]
+
+    /// The editor scene renders and forwards; it names no store, composition or
+    /// path type. The panes it composes are held to the same rule below.
     func testTheEditorSceneDecidesNothingItself() {
         let scene = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellView.swift" }?.1 ?? ""
         XCTAssertFalse(scene.isEmpty, "the editor scene is missing")
-        XCTAssertTrue(scene.contains("EditorPresentation"), scene)
-        XCTAssertTrue(scene.contains("let editor = model.editor"), scene)
 
-        let forbidden = [
-            "StoreLayout",
-            "StoreWriter",
-            "DirectoryStore",
-            "InMemoryStore",
-            "HostsStore",
-            "HostsComposer",
-            "Composition",
-            "ProfileCatalogue",
-            "ProfileParser",
-            "EditorModel",
-            "HostsFileApplier",
-            "PrivilegedWriter",
-            "DaemonClient",
-            "FileManager",
-            "appendingPathComponent",
-            "Data(contentsOf",
-            "String(contentsOf",
-            "URL("
-        ]
-
-        for needle in forbidden {
+        for needle in Self.storeAndCompositionNames {
             XCTAssertNil(scene.range(of: needle), "the editor scene contains \(needle)")
+        }
+    }
+
+    /// Every window scene added with the three panes is held to the same rule:
+    /// the store, the composition and the paths stay in app support.
+    func testEveryWindowSceneDecidesNothingItself() {
+        let scenes = sourceFiles(in: "Sources/HazmatApp").filter { Self.windowScenes.contains($0.0) }
+        XCTAssertEqual(
+            scenes.map(\.0).sorted(),
+            Self.windowScenes.sorted(),
+            "the window scenes are missing"
+        )
+
+        for (file, scene) in scenes {
+            for needle in Self.storeAndCompositionNames {
+                XCTAssertNil(scene.range(of: needle), "\(file) contains \(needle)")
+            }
         }
     }
 
@@ -97,20 +131,28 @@ final class ShellIsolationTests: XCTestCase {
 
         XCTAssertTrue(entryPoint.contains("@main"), entryPoint)
         XCTAssertTrue(entryPoint.contains("struct HazmatApp: App"), entryPoint)
-        XCTAssertTrue(entryPoint.contains("WindowGroup"), entryPoint)
+        XCTAssertTrue(entryPoint.contains("Window(\"Hazmat\", id: Self.windowID)"), entryPoint)
+        XCTAssertFalse(entryPoint.contains("WindowGroup"), entryPoint)
         XCTAssertTrue(entryPoint.contains("MenuBarExtra"), entryPoint)
     }
 
+    /// The shell model may know the live file's path, but every write goes
+    /// through the writer it was handed, never through one it made for itself.
     func testTheShellOnlyWritesThroughTheInjectedWriter() {
         let model = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellModel.swift" }?.1 ?? ""
-        let construction = "HostsFileApplier(fileURL: fileURL, writer: writer ?? Daemon" + "Client())"
 
-        XCTAssertTrue(model.contains(construction), model)
+        XCTAssertTrue(model.contains("writer: PrivilegedWriter? = nil"), model)
+        let daemonClient = "Daemon" + "Client()"
+        XCTAssertTrue(model.contains("let writer = writer ?? client"), model)
+        XCTAssertTrue(model.contains("let client = \(daemonClient)"), model)
+        XCTAssertTrue(model.contains("writer: writer"), model)
+        XCTAssertFalse(model.contains("\(daemonClient).write"), model)
+        XCTAssertFalse(model.contains("\(daemonClient).removeBlock"), model)
     }
 
-    /// One model, so the window and the status item cannot disagree about the
-    /// file they are both looking at.
-    func testTheAppCreatesOneModelAndHandsItToBothScenes() {
+    /// One model, shared by the window, the settings scene, the commands and the
+    /// status item, so they cannot disagree about the store they are looking at.
+    func testTheAppCreatesOneModelAndHandsItToEveryScene() {
         let sources = sourceFiles(in: "Sources/HazmatApp")
         let constructions = sources.reduce(0) { total, source in
             total + source.1.components(separatedBy: "ShellModel(").count - 1
@@ -121,6 +163,9 @@ final class ShellIsolationTests: XCTestCase {
         let entryPoint = sources.first { $0.0 == "HazmatApp.swift" }?.1 ?? ""
         XCTAssertTrue(entryPoint.contains("ShellView(model: model)"), entryPoint)
         XCTAssertTrue(entryPoint.contains("StatusMenu(model: model)"), entryPoint)
+        XCTAssertTrue(entryPoint.contains("SettingsView(model: model)"), entryPoint)
+        XCTAssertTrue(entryPoint.contains("ShellCommands(model: model)"), entryPoint)
+        XCTAssertTrue(entryPoint.contains("StatusMark(model: model)"), entryPoint)
     }
 
     /// The entry point declares scenes and nothing else: no item, label, or
@@ -129,13 +174,28 @@ final class ShellIsolationTests: XCTestCase {
         let entryPoint = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "HazmatApp.swift" }?.1 ?? ""
 
         XCTAssertTrue(
-            entryPoint.contains("StatusLabel(title: model.menu.statusTitle)"),
-            "the status item's content must come from the presentation in app support: \(entryPoint)"
+            entryPoint.contains("StatusMark(model: model)"),
+            "the status item's label comes from the mark beside the presentation: \(entryPoint)"
+        )
+        XCTAssertTrue(
+            entryPoint.contains("Settings {"),
+            "the settings scene is declared in the entry point: \(entryPoint)"
+        )
+        XCTAssertTrue(
+            entryPoint.contains(".commands { ShellCommands(model: model) }"),
+            "the menu bar is declared in the entry point: \(entryPoint)"
+        )
+        XCTAssertTrue(
+            entryPoint.contains(".defaultSize(width: 1080, height: 700)"),
+            "the documented default size is declared in the entry point: \(entryPoint)"
         )
 
         for needle in ["if ", "guard ", "switch ", "ForEach", "filter", ".contains(", "== "] {
             XCTAssertNil(entryPoint.range(of: needle), "\(entryPoint) contains \(needle)")
         }
+
+        let mark = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
+        XCTAssertTrue(mark.contains("Text(model.menu.statusTitle)"), mark)
     }
 
     /// The mark is a template image the system tints, and the title beside it is
@@ -144,7 +204,13 @@ final class ShellIsolationTests: XCTestCase {
         let mark = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
         XCTAssertFalse(mark.isEmpty, "the status item's mark is missing")
         XCTAssertTrue(mark.contains("isTemplate = true"), mark)
-        XCTAssertTrue(mark.contains("Text(title)"), "the mark must not replace the state title: \(mark)")
+        XCTAssertTrue(
+            mark.contains("Text(model.menu.statusTitle)"),
+            "the mark must not replace the state title: \(mark)"
+        )
+        // Both the one-times and the two-times file have to be loaded, or the
+        // mark is soft on a Retina menu bar.
+        XCTAssertTrue(mark.contains("NSImage(named:"), "the mark must be looked up by name: \(mark)")
 
         for (file, source) in sourceFiles(in: "Sources/HazmatApp") {
             for needle in ["renderingMode(.original)", "isTemplate = false", "isTemplate=false", ".tint("] {

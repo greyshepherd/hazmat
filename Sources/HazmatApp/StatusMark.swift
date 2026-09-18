@@ -1,33 +1,27 @@
 import AppKit
+import HazmatAppSupport
 import SwiftUI
 
-/// The status item's mark. It ships in the bundle as a black-plus-alpha template
-/// image, so macOS supplies the tint, the dark-mode appearance and the highlight
-/// inversion; nothing here may colour it. A bundle without the image shows the
-/// state title alone rather than an empty status item.
-enum StatusMark {
-    static let imageName = "menu-bar-template"
-
-    static var image: NSImage? {
-        guard let image = NSImage(named: imageName) else { return nil }
-        image.isTemplate = true
-        return image
-    }
-}
-
-/// What the status item shows: the mark beside the state the presentation named.
-/// The title is the part that says what is on, so it is shown either way.
-struct StatusLabel: View {
-    let title: String
+/// The status item's label: the brand's menu-bar mark beside the state title.
+/// The mark is a template image, so the system tints it for the appearance and
+/// the highlight, and it is looked up by name so both the one-times and the
+/// two-times file in the bundle are loaded. When the bundle does not carry it,
+/// the title alone is shown — the title is the part that says what is on.
+struct StatusMark: View {
+    let model: ShellModel
 
     var body: some View {
-        if let mark = StatusMark.image {
-            HStack(spacing: 4) {
+        HStack(spacing: 4) {
+            if let mark = Self.mark {
                 Image(nsImage: mark)
-                Text(title)
             }
-        } else {
-            Text(title)
+            Text(model.menu.statusTitle)
         }
     }
+
+    private static let mark: NSImage? = {
+        guard let image = NSImage(named: "menu-bar-template") else { return nil }
+        image.isTemplate = true
+        return image
+    }()
 }

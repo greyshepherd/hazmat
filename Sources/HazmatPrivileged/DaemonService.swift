@@ -48,6 +48,12 @@ final class DaemonService: NSObject, HazmatDaemonXPC {
         self.handler = handler
     }
 
+    /// The check answers as soon as the daemon is running: it has nothing to
+    /// decide, so it reads nothing through the handler and touches no file.
+    func checkIn(withReply reply: @escaping () -> Void) {
+        reply()
+    }
+
     func writeFileBytes(_ bytes: Data, baselineDigest: Data, withReply reply: @escaping (Int32, String?) -> Void) {
         let (status, reason) = handler.write(bytes: bytes, baselineDigest: baselineDigest)
         reply(status, reason)

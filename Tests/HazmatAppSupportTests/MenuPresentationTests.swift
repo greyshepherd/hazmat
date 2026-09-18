@@ -36,7 +36,7 @@ final class MenuPresentationTests: XCTestCase {
         actions(menu).filter { action in
             switch action {
             case .activate, .overwriteDrift: return true
-            case .turnOff, .registerHelper, .checkForUpdates: return false
+            case .turnOff, .registerHelper, .repairHelper, .checkForUpdates: return false
             }
         }
     }
@@ -224,6 +224,18 @@ final class MenuPresentationTests: XCTestCase {
 
         XCTAssertTrue(lines(menu).contains(HelperState.awaitingApproval.summary), lines(menu).description)
         XCTAssertEqual(titles(menu, "helper"), ["Register Helper"])
+    }
+
+    func testAHelperThatDoesNotAnswerIsReportedAndTheRepairIsOffered() {
+        let menu = MenuPresentation(
+            reading: derived([work], .active([work])),
+            helper: .notAnswering,
+            notice: ""
+        )
+
+        XCTAssertTrue(lines(menu).contains(HelperState.notAnswering.summary), lines(menu).description)
+        XCTAssertEqual(titles(menu, "helper"), ["Repair Helper"])
+        XCTAssertEqual(menuItem(menu, titled: "Repair Helper")?.action, .repairHelper)
     }
 
     func testAProfileThatFailsToRenderIsReportedAndHasNoItem() {

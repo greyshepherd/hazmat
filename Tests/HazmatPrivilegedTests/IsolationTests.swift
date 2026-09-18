@@ -37,7 +37,11 @@ final class IsolationTests: XCTestCase {
 
     func testNoTestNamesOrTouchesTheRealHostsFileOrTheRegistrationAPI() {
         let realHosts = "\"/etc" + "/hosts\""
-        let needles = [realHosts, "SMAppService", "HelperRegistration()", "DaemonClient("]
+        // A client that names the mach service is the one that would reach the
+        // real helper; a client given a connection factory reaches only a
+        // listener the test holds. The write bound and the check are therefore
+        // exercised without a daemon, and nothing here asks for approval.
+        let needles = [realHosts, "SMAppService", "HelperRegistration()", "DaemonClient()", "machServiceName:"]
 
         // IntegrationTests.swift is the exception and the point: it snapshots the
         // real file's bytes and modification time before and after the suite, and

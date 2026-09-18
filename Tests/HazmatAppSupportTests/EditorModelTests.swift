@@ -6,131 +6,12 @@ import XCTest
 private let work = ProfileID("work")
 private let other = ProfileID("other")
 
-/// A throwaway live file standing in for the real hosts file.
-private final class LiveFile {
-    let url: URL
-
-    init(_ text: String) throws {
-        url = FileManager.default.temporaryDirectory.appendingPathComponent("hazmat-live-\(UUID().uuidString)")
-        try text.write(to: url, atomically: true, encoding: .utf8)
-    }
-
-    var data: Data { (try? Data(contentsOf: url)) ?? Data() }
-
-    func write(_ data: Data) throws {
-        try data.write(to: url, options: .atomic)
-    }
-
-    func state() throws -> FileState {
-        try FileState(of: url)
-    }
-
-    func remove() {
-        try? FileManager.default.removeItem(at: url)
-    }
-}
-
-private struct FileState: Equatable {
-    let bytes: Data
-    let size: Int
-    let modificationDate: Date
-
-    init(of url: URL) throws {
-        let attributes = try FileManager.default.attributesOfItem(atPath: url.path)
-        bytes = try Data(contentsOf: url)
-        size = (attributes[.size] as? NSNumber)?.intValue ?? -1
-        modificationDate = (attributes[.modificationDate] as? Date) ?? .distantPast
-    }
-}
-
-/// A store and a live file the editor reads.
-private final class EditorFixture {
-    let store: TemporaryStore
-    let live: LiveFile
-
-    init(store files: [(String, String)], live liveText: String) throws {
-        store = try TemporaryStore()
-        for (contents, path) in files {
-            try store.write(contents, to: path)
-        }
-        live = try LiveFile(liveText)
-    }
-
-    var shipped: Data { bytes("127.0.0.1\tlocalhost\n") }
-
-    func model(writer: PrivilegedWriter) -> EditorModel {
-        EditorModel(storeRoot: store.root, fileURL: live.url, writer: writer)
-    }
-
-    /// The block the store's profile renders.
-    func rendered(_ profile: ProfileID) throws -> Data {
-        let composition = try HostsComposer(store: DirectoryStore(root: store.root)).compose(profile: profile)
-        return BlockRenderer.render(composition)
-    }
-
-    /// Puts the profile's rendering into the live file, behind the shipped bytes.
-    func applyToLive(_ profile: ProfileID) throws {
-        try live.write(try BlockSplice.splice(block: try rendered(profile), into: shipped))
-    }
-
-    func text(_ relativePath: String) throws -> String {
-        try String(contentsOf: store.root.appendingPathComponent(relativePath), encoding: .utf8)
-    }
-
-    func remove() {
-        store.remove()
-        live.remove()
-    }
-}
-
-/// Performs the write the way the daemon would, in the test process.
-private final class LocalWriter: PrivilegedWriter, @unchecked Sendable {
-    let target: URL
-    private(set) var writes = 0
-
-    init(target: URL) {
-        self.target = target
-    }
-
-    func write(bytes: Data, baseline: Data) -> PrivilegedWriteResult {
-        guard let live = try? Data(contentsOf: target), live == baseline else {
-            return .refused(reason: "the file changed since it was read")
-        }
-        do {
-            try bytes.write(to: target, options: .atomic)
-            writes += 1
-            return .written
-        } catch {
-            return .failed(reason: "\(error)")
-        }
-    }
-
-    func removeBlock(baseline: Data) -> PrivilegedWriteResult {
-        .refused(reason: "this test does not remove blocks")
-    }
-}
-
-/// A helper that is not registered: every request is refused with that reason.
-private final class UnregisteredHelper: PrivilegedWriter, @unchecked Sendable {
-    private(set) var requests = 0
-
-    func write(bytes: Data, baseline: Data) -> PrivilegedWriteResult {
-        requests += 1
-        return .refused(reason: "the helper is not registered")
-    }
-
-    func removeBlock(baseline: Data) -> PrivilegedWriteResult {
-        requests += 1
-        return .refused(reason: "the helper is not registered")
-    }
-}
-
 final class EditorModelTests: XCTestCase {
     private let base = FragmentID("base")
     private let project = FragmentID("project")
 
-    private func stackedFixture() throws -> EditorFixture {
-        try EditorFixture(
+    private func stackedFixture() throws -> StoreFixture {
+        try StoreFixture(
             store: [
                 ("127.0.0.1\tlocalhost alpha.example\n", "fragments/base.hosts"),
                 ("10.0.0.9\talpha.example\n", "fragments/project.hosts"),
@@ -180,12 +61,30 @@ final class EditorModelTests: XCTestCase {
         XCTAssertTrue(presentation.actions.contains(.newFragment))
     }
 
+    func testAStoreThatHoldsOnlyAFragmentStillReadsAsAStore() throws {
+        let store = try TemporaryStore()
+        let root = store.root
+        store.remove()
+        let live = try LiveFile("127.0.0.1\tlocalhost\n")
+        defer { live.remove() }
+        let model = EditorModel(storeRoot: root, fileURL: live.url, writer: UnregisteredHelper())
+        XCTAssertEqual(model.createFragment(named: "base").store, .success(.wrote))
+
+        let presentation = model.read()
+
+        XCTAssertTrue(presentation.storeExists, "the store holds the fragment that was just created")
+        XCTAssertEqual(presentation.profiles, [])
+        XCTAssertEqual(presentation.fragments, [base])
+        XCTAssertEqual(presentation.selection, .fragment(base))
+        XCTAssertEqual(presentation.fragmentText, "")
+    }
+
     func testTheSelectedFragmentsTextIsLoadedFromTheStore() throws {
         let fixture = try stackedFixture()
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
 
-        let presentation = model.read(fragment: project)
+        let presentation = model.read(selection: .fragment(project))
 
         XCTAssertEqual(presentation.selectedFragment, project)
         XCTAssertEqual(presentation.fragmentText, "10.0.0.9\talpha.example\n")
@@ -200,7 +99,7 @@ final class EditorModelTests: XCTestCase {
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
 
-        let presentation = model.read(profile: work)
+        let presentation = model.read(selection: .profile(work))
 
         XCTAssertEqual(presentation.entries.map(\.name), ["localhost", "alpha.example"])
         XCTAssertEqual(
@@ -214,7 +113,7 @@ final class EditorModelTests: XCTestCase {
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
 
-        let presentation = model.read(profile: work)
+        let presentation = model.read(selection: .profile(work))
 
         XCTAssertEqual(presentation.entries.first { $0.name == "alpha.example" }?.address, "10.0.0.9")
         XCTAssertEqual(presentation.displacements.count, 1)
@@ -226,7 +125,7 @@ final class EditorModelTests: XCTestCase {
     }
 
     func testAMalformedLineIsReportedWithItsFragmentAndLine() throws {
-        let fixture = try EditorFixture(
+        let fixture = try StoreFixture(
             store: [
                 ("127.0.0.1\tlocalhost\nnot an entry\n", "fragments/base.hosts"),
                 ("base\n", "profiles/work.profile")
@@ -236,7 +135,7 @@ final class EditorModelTests: XCTestCase {
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
 
-        let presentation = model.read(profile: work)
+        let presentation = model.read(selection: .profile(work))
 
         XCTAssertTrue(presentation.entries.isEmpty)
         XCTAssertEqual(presentation.resolved.problems.count, 1)
@@ -250,7 +149,7 @@ final class EditorModelTests: XCTestCase {
     }
 
     func testAProfileThatCannotResolveShowsNoEntriesAndNamesTheMissingFragment() throws {
-        let fixture = try EditorFixture(
+        let fixture = try StoreFixture(
             store: [
                 ("base\nmissing\n", "profiles/work.profile"),
                 ("127.0.0.1\tlocalhost\n", "fragments/base.hosts")
@@ -260,7 +159,7 @@ final class EditorModelTests: XCTestCase {
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
 
-        let presentation = model.read(profile: work)
+        let presentation = model.read(selection: .profile(work))
 
         XCTAssertEqual(presentation.entries, [])
         XCTAssertTrue(presentation.problems.contains { $0.message.contains("missing") }, presentation.problems.description)
@@ -272,8 +171,8 @@ final class EditorModelTests: XCTestCase {
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
 
-        let first = model.read(profile: work, fragment: project)
-        let again = model.read(profile: work, fragment: project)
+        let first = model.read(selection: .profile(work))
+        let again = model.read(selection: .profile(work))
 
         XCTAssertEqual(first, again)
         XCTAssertEqual(first.entries, again.entries)
@@ -286,14 +185,14 @@ final class EditorModelTests: XCTestCase {
         let fixture = try stackedFixture()
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
-        let before = model.read(profile: work)
+        let before = model.read(selection: .profile(work))
         XCTAssertEqual(before.entries.first { $0.name == "alpha.example" }?.address, "10.0.0.9")
 
         let outcome = model.moveLayer(from: 1, to: 0, in: work, previous: before)
 
         XCTAssertEqual(outcome.store, .success(.wrote))
         XCTAssertEqual(try fixture.text("profiles/work.profile"), "project\nbase\n")
-        let after = model.read(profile: work)
+        let after = model.read(selection: .profile(work))
         XCTAssertEqual(after.layers, [project, base])
         XCTAssertEqual(after.entries.first { $0.name == "alpha.example" }?.address, "127.0.0.1")
         XCTAssertEqual(after.displacements.count, 1)
@@ -304,11 +203,11 @@ final class EditorModelTests: XCTestCase {
         let fixture = try stackedFixture()
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
-        var presentation = model.read(profile: work)
+        var presentation = model.read(selection: .profile(work))
 
         let removed = model.removeLayer(at: 1, from: work, previous: presentation)
         XCTAssertEqual(removed.store, .success(.wrote))
-        presentation = model.read(profile: work)
+        presentation = model.read(selection: .profile(work))
         XCTAssertEqual(presentation.layers, [base])
         XCTAssertTrue(presentation.displacements.isEmpty)
         XCTAssertEqual(presentation.entries.map(\.name), ["localhost", "alpha.example"])
@@ -316,7 +215,7 @@ final class EditorModelTests: XCTestCase {
 
         let added = model.addLayer(project, to: work, previous: presentation)
         XCTAssertEqual(added.store, .success(.wrote))
-        presentation = model.read(profile: work)
+        presentation = model.read(selection: .profile(work))
         XCTAssertEqual(presentation.layers, [base, project])
         XCTAssertEqual(presentation.entries.first { $0.name == "alpha.example" }?.address, "10.0.0.9")
         XCTAssertEqual(try fixture.text("profiles/work.profile"), "base\nproject\n")
@@ -327,12 +226,12 @@ final class EditorModelTests: XCTestCase {
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
 
-        let first = model.removeLayer(at: 0, from: work, previous: model.read(profile: work))
+        let first = model.removeLayer(at: 0, from: work, previous: model.read(selection: .profile(work)))
         XCTAssertEqual(first.store, .success(.wrote))
-        let second = model.removeLayer(at: 0, from: work, previous: model.read(profile: work))
+        let second = model.removeLayer(at: 0, from: work, previous: model.read(selection: .profile(work)))
         XCTAssertEqual(second.store, .success(.wrote))
 
-        let empty = model.read(profile: work)
+        let empty = model.read(selection: .profile(work))
         XCTAssertEqual(empty.layers, [])
         XCTAssertEqual(empty.entries, [])
         let rendered = try XCTUnwrap(empty.rendering)
@@ -347,7 +246,7 @@ final class EditorModelTests: XCTestCase {
         let writer = LocalWriter(target: fixture.live.url)
         let model = fixture.model(writer: writer)
         try fixture.applyToLive(work)
-        let before = model.read(profile: work)
+        let before = model.read(selection: .profile(work))
         XCTAssertTrue(before.isApplied)
 
         let outcome = model.save(
@@ -365,7 +264,7 @@ final class EditorModelTests: XCTestCase {
         let live = try XCTUnwrap(ManagedBlock.locate(in: fixture.live.data))
         XCTAssertEqual(Data(fixture.live.data[live.range]), try fixture.rendered(work))
         XCTAssertEqual(text(try BlockSplice.strip(from: fixture.live.data)), "127.0.0.1\tlocalhost\n")
-        let after = model.read(profile: work)
+        let after = model.read(selection: .profile(work))
         XCTAssertTrue(after.isApplied, "the file holds the block the edited profile renders now")
         XCTAssertTrue(after.entries.contains { $0.name == "changed.example" })
     }
@@ -376,7 +275,7 @@ final class EditorModelTests: XCTestCase {
         let writer = LocalWriter(target: fixture.live.url)
         let model = fixture.model(writer: writer)
         try fixture.applyToLive(work)
-        let before = model.read(profile: work)
+        let before = model.read(selection: .profile(work))
         XCTAssertTrue(before.isApplied)
 
         // Another tool changes a line inside the block.
@@ -406,7 +305,7 @@ final class EditorModelTests: XCTestCase {
         try fixture.applyToLive(work)
         let liveBefore = try fixture.live.state()
 
-        let otherProfile = model.read(profile: other)
+        let otherProfile = model.read(selection: .profile(other))
         XCTAssertFalse(otherProfile.isApplied)
         let outcome = model.save(
             fragment: base,
@@ -427,7 +326,7 @@ final class EditorModelTests: XCTestCase {
         let helper = UnregisteredHelper()
         let model = fixture.model(writer: helper)
         try fixture.applyToLive(work)
-        let before = model.read(profile: work)
+        let before = model.read(selection: .profile(work))
         let liveBefore = try fixture.live.state()
 
         let outcome = model.save(
@@ -444,6 +343,31 @@ final class EditorModelTests: XCTestCase {
         XCTAssertEqual(try fixture.text("fragments/base.hosts"), "127.0.0.1\tchanged.example\n")
     }
 
+    func testASavedFragmentInAStoreWithNoProfileReachesTheStoreAlone() throws {
+        let store = try TemporaryStore()
+        let root = store.root
+        store.remove()
+        let live = try LiveFile("127.0.0.1\tlocalhost\n")
+        defer { live.remove() }
+        let helper = UnregisteredHelper()
+        let model = EditorModel(storeRoot: root, fileURL: live.url, writer: helper)
+        let liveBefore = try live.state()
+        XCTAssertEqual(model.createFragment(named: "base").store, .success(.wrote))
+
+        let outcome = model.save(
+            fragment: base,
+            text: "127.0.0.1\tchanged.example\n",
+            editing: nil,
+            previous: model.read(selection: .fragment(base))
+        )
+
+        XCTAssertEqual(outcome.store, .success(.wrote))
+        XCTAssertNil(outcome.apply, "a store with no profile has no block to re-apply")
+        XCTAssertEqual(helper.requests, 0, "authoring must not ask the helper for anything")
+        XCTAssertEqual(try store.text("fragments/base.hosts"), "127.0.0.1\tchanged.example\n")
+        XCTAssertEqual(try live.state(), liveBefore)
+    }
+
     // MARK: - 3.5 The model needs no helper
 
     func testEveryStoreOperationSucceedsWithNoHelperAndLeavesTheLiveFileAlone() throws {
@@ -455,10 +379,10 @@ final class EditorModelTests: XCTestCase {
 
         XCTAssertEqual(model.createProfile(named: "fresh").store, .success(.wrote))
         XCTAssertEqual(model.createFragment(named: "extra").store, .success(.wrote))
-        XCTAssertEqual(model.save(fragment: base, text: "127.0.0.1\trenamed.example\n", editing: other, previous: model.read(profile: other)).store, .success(.wrote))
-        XCTAssertEqual(model.addLayer(project, to: other, previous: model.read(profile: other)).store, .success(.wrote))
-        XCTAssertEqual(model.moveLayer(from: 1, to: 0, in: other, previous: model.read(profile: other)).store, .success(.wrote))
-        XCTAssertEqual(model.removeLayer(at: 0, from: other, previous: model.read(profile: other)).store, .success(.wrote))
+        XCTAssertEqual(model.save(fragment: base, text: "127.0.0.1\trenamed.example\n", editing: other, previous: model.read(selection: .profile(other))).store, .success(.wrote))
+        XCTAssertEqual(model.addLayer(project, to: other, previous: model.read(selection: .profile(other))).store, .success(.wrote))
+        XCTAssertEqual(model.moveLayer(from: 1, to: 0, in: other, previous: model.read(selection: .profile(other))).store, .success(.wrote))
+        XCTAssertEqual(model.removeLayer(at: 0, from: other, previous: model.read(selection: .profile(other))).store, .success(.wrote))
         XCTAssertEqual(model.duplicate(profile: work, as: "copy").store, .success(.wrote))
         XCTAssertEqual(model.duplicate(fragment: base, as: "copy").store, .success(.wrote))
         XCTAssertEqual(model.rename(profile: ProfileID("copy"), to: "renamed").store, .success(.wrote))
