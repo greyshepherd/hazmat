@@ -188,14 +188,40 @@ DIRTY="$(git -C "$ROOT" status --porcelain | grep -v " $FEED_RELATIVE$" || true)
     || fail "the working tree holds changes that are not the feed:
 $DIRTY"
 
+# MARK: - The tag
+
+# The tag names the commit the release was cut from. This is the only thing that
+# knows which commit that is: left to itself, the release host creates the tag at
+# whatever its default branch's head happens to be, which need not be the tree the
+# artifact was built from, and then the tag names a commit that cannot reproduce
+# the release.
+step "tagging $TAG"
+HEAD_COMMIT="$(git -C "$ROOT" rev-parse HEAD)"
+SHORT_HEAD="$(git -C "$ROOT" log -1 --format=%h "$HEAD_COMMIT")"
+
+# The remote's tag is authoritative: bringing it first means a tag that already
+# names a different commit is seen here rather than pushed over.
+if git -C "$ROOT" fetch --quiet --force origin "refs/tags/$TAG:refs/tags/$TAG" 2>/dev/null; then
+    TAGGED_COMMIT="$(git -C "$ROOT" rev-parse "refs/tags/$TAG^{commit}")"
+    [ "$TAGGED_COMMIT" = "$HEAD_COMMIT" ] \
+        || fail "$TAG already names $(git -C "$ROOT" log -1 --format=%h "$TAGGED_COMMIT"), not the commit being published ($SHORT_HEAD); a published tag is never moved, so cut a higher build number"
+    echo "   $TAG already names $SHORT_HEAD"
+else
+    git -C "$ROOT" tag --annotate "$TAG" --message "Hazmat $SHORT_VERSION" \
+        || fail "the commit could not be tagged"
+    git -C "$ROOT" push --quiet origin "refs/tags/$TAG" \
+        || fail "the tag $TAG could not be pushed"
+    echo "   $TAG names $SHORT_HEAD"
+fi
+
 # MARK: - The release
 
 step "publishing $TAG to $RELEASE_REPO"
 local_digest="$(shasum -a 256 "$ARTIFACT" | awk '{print $1}')"
 if gh release view "$TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
-    # The tag is there. A published archive is never replaced, so the only way this
-    # is not a refusal is that the release already carries these exact bytes — which
-    # is what a run that stopped after uploading and before the feed leaves behind.
+    # The release is there. A published archive is never replaced, so the only way
+    # this is not a refusal is that it already carries these exact bytes — which is
+    # what a run that stopped after uploading and before the feed leaves behind.
     # Refusing there would make the feed impossible to write without cutting a
     # version nobody asked for.
     published_digest="$(curl --silent --location "$ARCHIVE_URL" | shasum -a 256 | awk '{print $1}')"
@@ -205,9 +231,12 @@ if gh release view "$TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
         || fail "release $TAG already carries a different archive; a published archive is never replaced, so publish a higher build number"
     echo "   $TAG already carries this archive, so only the feed is left to write"
 else
+    # `--verify-tag` is what keeps the tag this step made: without it the host
+    # would create its own at the default branch's head.
     gh release create "$TAG" "$ARTIFACT" \
         --repo "$RELEASE_REPO" \
         --title "Hazmat $SHORT_VERSION" \
+        --verify-tag \
         "${NOTES_ARGUMENT[@]}" \
         || fail "the release could not be created"
 fi

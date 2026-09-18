@@ -102,10 +102,14 @@ Scripts/publish.sh --artifact build/release/Hazmat-<version>.dmg
 ```
 
 The step reads the published feed first and refuses a build number that is not
-greater than the greatest it carries. It creates the release, uploads the image,
-checks that the image answers at its address, and only then writes the feed entry
-naming it and pushes the feed. An entry is never readable before the archive it
-names.
+greater than the greatest it carries. It tags the commit it is running on with the
+release's tag — an annotated tag carrying the version — and pushes that before it
+creates the release, so the tag names the tree the artifact was built from rather
+than whichever commit the host's default branch happens to point at. A tag that
+already names another commit is refused rather than moved. It then creates the
+release against that tag, uploads the image, checks that the image answers at its
+address, and only then writes the feed entry naming it and pushes the feed. An
+entry is never readable before the archive it names.
 
 The token comes from the environment: `HAZMAT_GITHUB_TOKEN`, or `GITHUB_TOKEN`. It
 needs to be able to create releases in the repository the configuration names and
@@ -199,4 +203,7 @@ than assumed:
 
 A published version is never rewritten. A bad release is corrected by publishing a
 higher build number, so the feed only ever gains entries and an installed copy only
-ever moves forward.
+ever moves forward. The same holds for the tag: it names the commit a release came
+from, and a tag that already names one is never moved to another. A release built
+from the wrong tree is corrected the same way a bad one is, by cutting a higher
+build number.

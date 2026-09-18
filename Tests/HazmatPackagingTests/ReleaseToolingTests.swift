@@ -12,9 +12,22 @@ final class ReleaseToolingTests: XCTestCase {
     }
 
     private func run(_ script: String, _ arguments: [String]) throws -> Outcome {
+        try run(
+            repositoryRoot().appendingPathComponent("Scripts/\(script)"),
+            arguments,
+            environment: [:]
+        )
+    }
+
+    private func run(
+        _ script: URL,
+        _ arguments: [String],
+        environment: [String: String]
+    ) throws -> Outcome {
         let process = Process()
-        process.executableURL = repositoryRoot().appendingPathComponent("Scripts/\(script)")
+        process.executableURL = script
         process.arguments = arguments
+        process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
         let pipe = Pipe()
         process.standardOutput = pipe
         process.standardError = pipe
@@ -22,6 +35,78 @@ final class ReleaseToolingTests: XCTestCase {
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
         process.waitUntilExit()
         return Outcome(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
+    }
+
+    @discardableResult
+    private func git(_ arguments: [String], in directory: URL?) throws -> Outcome {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        process.arguments = directory.map { ["-C", $0.path] + arguments } ?? arguments
+        process.environment = ProcessInfo.processInfo.environment.merging([
+            "GIT_AUTHOR_NAME": "rehearsal",
+            "GIT_AUTHOR_EMAIL": "rehearsal@invalid",
+            "GIT_COMMITTER_NAME": "rehearsal",
+            "GIT_COMMITTER_EMAIL": "rehearsal@invalid",
+        ]) { _, new in new }
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = pipe
+        try process.run()
+        let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+        let outcome = Outcome(status: process.terminationStatus, output: String(decoding: data, as: UTF8.self))
+        XCTAssertEqual(outcome.status, 0, "git \(arguments.joined(separator: " ")): \(outcome.output)")
+        return outcome
+    }
+
+    /// A rehearsal of the repository: a bare origin and a clone of it, with the
+    /// working tree's publish script committed on top. The clone is the root the
+    /// script resolves, so pushing a tag lands in the throwaway origin rather than
+    /// in the repository this suite is running against.
+    private func rehearsal(cutting version: String, build: Int) throws -> (clone: URL, origin: URL) {
+        let scratch = try workingDirectory("rehearsal")
+        let origin = scratch.appendingPathComponent("origin.git")
+        try git(["clone", "--quiet", "--local", "--bare", repositoryRoot().path, origin.path], in: nil)
+        let clone = scratch.appendingPathComponent("clone")
+        try git(["clone", "--quiet", "--local", origin.path, clone.path], in: nil)
+
+        // The working tree's script, not the committed one, so this cannot pass
+        // against a version of the script that is not the one being changed.
+        let script = try Data(contentsOf: repositoryRoot().appendingPathComponent("Scripts/publish.sh"))
+        try script.write(to: clone.appendingPathComponent("Scripts/publish.sh"))
+
+        let config = try JSONSerialization.jsonObject(
+            with: try Data(contentsOf: clone.appendingPathComponent("release/config.json"))
+        ) as? [String: Any] ?? [:]
+        var rewritten = config
+        rewritten["shortVersion"] = version
+        rewritten["buildNumber"] = build
+        try JSONSerialization.data(withJSONObject: rewritten, options: [.prettyPrinted])
+            .write(to: clone.appendingPathComponent("release/config.json"))
+
+        try git(["add", "-A"], in: clone)
+        try git(["commit", "--quiet", "-m", "rehearsal: cut \(version)"], in: clone)
+        return (clone, origin)
+    }
+
+    private func head(of repository: URL) throws -> String {
+        try git(["rev-parse", "HEAD"], in: repository).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func tagTarget(_ tag: String, in repository: URL) throws -> String {
+        try git(["rev-parse", "\(tag)^{commit}"], in: repository).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    private func publishedFixture() throws -> URL {
+        let directory = try workingDirectory("published-empty")
+        let feed = directory.appendingPathComponent("appcast.xml")
+        try write(
+            "<?xml version=\"1.0\"?><rss><channel><title>Hazmat</title></channel></rss>\n",
+            to: feed
+        )
+        return feed
     }
 
     private func workingDirectory(_ name: String) throws -> URL {
@@ -279,6 +364,62 @@ final class ReleaseToolingTests: XCTestCase {
         XCTAssertNotEqual(refused.status, 0)
         XCTAssertTrue(refused.output.contains("HAZMAT_GITHUB_TOKEN"), refused.output)
         XCTAssertTrue(refused.output.contains("no GitHub token"), refused.output)
+    }
+
+    // MARK: - The tag names the commit the release was cut from
+
+    /// Left to the release host, the tag lands on whatever the default branch's
+    /// head happens to be, which need not be the tree the artifact was built from —
+    /// so the tag named a commit that could not reproduce the release.
+    func testAPublishTagsTheCommitItPublishes() throws {
+        let (clone, origin) = try rehearsal(cutting: "9.9.9", build: 9)
+        let published = try git(["rev-parse", "HEAD"], in: clone).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let outcome = try run(
+            clone.appendingPathComponent("Scripts/publish.sh"),
+            [
+                "--artifact", try artifact().path,
+                "--published", try publishedFixture().path
+            ],
+            environment: ["HAZMAT_GITHUB_TOKEN": "not-a-real-token"]
+        )
+
+        XCTAssertTrue(outcome.output.contains("tagging v9.9.9"), outcome.output)
+        XCTAssertEqual(try tagTarget("v9.9.9", in: origin), published, "the tag must name the commit being published")
+        XCTAssertEqual(
+            try git(["cat-file", "-t", "v9.9.9"], in: origin).output.trimmingCharacters(in: .whitespacesAndNewlines),
+            "tag",
+            "the tag carries a message rather than pointing at a commit unnamed"
+        )
+        // The token is a placeholder, so the run stops at the release host — which
+        // is after the tag, and is what this test is not about.
+        XCTAssertNotEqual(outcome.status, 0)
+    }
+
+    func testAPublishRefusesATagThatNamesAnotherCommit() throws {
+        let (clone, origin) = try rehearsal(cutting: "9.9.9", build: 9)
+        let published = try git(["rev-parse", "HEAD"], in: clone).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let earlier = try git(["rev-parse", "HEAD~1"], in: clone).output
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        try git(["tag", "--annotate", "v9.9.9", "--message", "a tag on the wrong commit", earlier], in: clone)
+        try git(["push", "--quiet", "origin", "refs/tags/v9.9.9"], in: clone)
+
+        let refused = try run(
+            clone.appendingPathComponent("Scripts/publish.sh"),
+            [
+                "--artifact", try artifact().path,
+                "--published", try publishedFixture().path
+            ],
+            environment: ["HAZMAT_GITHUB_TOKEN": "not-a-real-token"]
+        )
+
+        XCTAssertNotEqual(refused.status, 0)
+        XCTAssertTrue(refused.output.contains("already names"), refused.output)
+        XCTAssertTrue(refused.output.contains("never moved"), refused.output)
+        XCTAssertEqual(try tagTarget("v9.9.9", in: origin), earlier, "a published tag is left where it is")
+        XCTAssertNotEqual(try tagTarget("v9.9.9", in: origin), published)
     }
 
     func testARehearsalReportsWhatWouldBePublished() throws {
