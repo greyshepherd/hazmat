@@ -65,13 +65,25 @@ The notarization credential comes from the environment and is never prompted for
 A keychain profile is either kind, stored once:
 
 ```
-xcrun notarytool store-credentials hazmat --key ~/private_keys/AuthKey_ABC123.p8 --key-id ABC123
+xcrun notarytool store-credentials hazmat \
+  --key ~/.appstoreconnect/private_keys/AuthKey_ABC123.p8 --key-id ABC123 --issuer <uuid>
 xcrun notarytool store-credentials hazmat --apple-id you@example.com --team-id BHY3LCR536
 ```
 
 The API key is the better of the two: it is scoped to notarization, revocable on its
 own, and needs no app-specific password. An individual key carries no issuer; a
-team key must carry one.
+team key must carry one, and a team key used without its issuer fails as
+`401 Unauthenticated` — which reads like a bad key rather than a missing argument.
+
+When `iCloud Keychain` is on, `store-credentials` may write the profile to the
+synced keychain, where a later `--keychain-profile` lookup does not authenticate
+against it even though the store reported success. Storing the key and passing it
+with `HAZMAT_NOTARY_KEY`, `HAZMAT_NOTARY_KEY_ID` and `HAZMAT_NOTARY_ISSUER`
+avoids the keychain altogether and is what the release has been run with.
+
+The `.p8` is a private key. It belongs in `~/.appstoreconnect/private_keys`, never
+in the repository; the ignore rules refuse it, but the location is the real
+protection.
 
 The signing identity is found in the keychain, or named with
 `HAZMAT_SIGN_IDENTITY`. A run with no credential names the one that is missing and

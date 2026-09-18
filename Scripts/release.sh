@@ -146,17 +146,36 @@ staple_and_check() {
     xcrun stapler validate "$artifact" || fail "$what carries no valid ticket"
 }
 
+# MARK: - The disk image
+
+# The image carries the identity the bundle was signed with, read from the bundle
+# rather than resolved again, so the two cannot disagree about who signed them.
+sign_the_image() {
+    local image="$1" authority
+    authority="$(codesign -dvv "$APP" 2>&1 | sed -n 's/^Authority=//p' | sed -n '1p')"
+    [ -n "$authority" ] \
+        || fail "the bundle carries no signing authority, so the image cannot be signed to match it"
+    codesign --force --sign "$authority" --timestamp "$image" \
+        || fail "the disk image could not be signed"
+}
+
 # MARK: - Checks that need no network
 
-assess() {
-    local artifact="$1" what="$2" type="$3"
+# An application is assessed as an executable and a disk image as the primary
+# signature of the thing a person opens; passing the wrong context to either
+# reports a rejection that says nothing about the artifact.
+assess_application() {
     local result
-    if ! result="$(spctl --assess --type "$type" --context context:primary-signature --verbose=4 "$artifact" 2>&1)"; then
-        # A disk image is assessed as a signature rather than as an executable.
-        result="$(spctl --assess --type "$type" --verbose=4 "$artifact" 2>&1)" \
-            || fail "$what was refused by the system's assessment: $result"
-    fi
-    echo "   $what is accepted for distribution"
+    result="$(spctl --assess --type exec --verbose=4 "$APP" 2>&1)" \
+        || fail "the application was refused by the system's assessment: $result"
+    echo "   the application is accepted for distribution"
+}
+
+assess_image() {
+    local image="$1" result
+    result="$(spctl --assess --type open --context context:primary-signature --verbose=4 "$image" 2>&1)" \
+        || fail "the disk image was refused by the system's assessment: $result"
+    echo "   the disk image is accepted for distribution"
 }
 
 # MARK: - The run
@@ -192,14 +211,18 @@ hdiutil create -volname "$APP_NAME" -srcfolder "$STAGE" -ov -format UDZO "$DMG" 
     || fail "the disk image could not be built"
 rm -rf "$STAGE"
 
+# Signed before it is notarized: the ticket covers the image as it is submitted,
+# and an unsigned image is one the system's assessment cannot evaluate at all.
+sign_the_image "$DMG"
+
 step "notarizing the disk image"
 notarize "$DMG" "the disk image"
 staple_and_check "$DMG" "the disk image"
 
 step "verifying the artifacts"
 "$ROOT/Scripts/verify-bundle.sh" "$APP" --config "$CONFIG" || fail "the bundle no longer verifies"
-assess "$APP" "the application" exec
-assess "$DMG" "the disk image" open
+assess_application
+assess_image "$DMG"
 
 if [ "$KEEP_WORKING" != "true" ]; then
     rm -rf "$WORK"
