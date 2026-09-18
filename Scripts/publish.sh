@@ -128,7 +128,10 @@ fi
 if [ -z "$NOTES" ]; then
     NOTES="$ROOT/release/notes/$SHORT_VERSION.md"
 fi
-NOTES_ARGUMENT=()
+# Always one element: an empty array is unbound under `set -u` in the bash this
+# ships with, so a release with no notes file names how its notes are made rather
+# than passing nothing.
+NOTES_ARGUMENT=(--generate-notes)
 if [ -f "$NOTES" ]; then
     NOTES_ARGUMENT=(--notes-file "$NOTES")
 fi
@@ -164,7 +167,7 @@ archive:    $ARCHIVE_URL
 feed:       $FEED_URL
 feed file:  $FEED_FILE on $FEED_BRANCH
 published:  ${PUBLISHED_MAX:-nothing}
-notes:      ${NOTES_ARGUMENT[*]:-generated from the commits}
+notes:      $([ -f "$NOTES" ] && printf '%s' "$NOTES" || printf 'generated from the commits')
 token:      ${TOKEN_ENV:-none set}
 REPORT
     exit 0
@@ -192,11 +195,11 @@ if gh release view "$TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
     fail "release $TAG already exists; a tag is never reused"
 fi
 
-gh release create "$TAG" "$ARTIFACT" \
-    --repo "$RELEASE_REPO" \
-    --title "Hazmat $SHORT_VERSION" \
-    "${NOTES_ARGUMENT[@]}" \
-    || fail "the release could not be created"
+    gh release create "$TAG" "$ARTIFACT" \
+        --repo "$RELEASE_REPO" \
+        --title "Hazmat $SHORT_VERSION" \
+        "${NOTES_ARGUMENT[@]}" \
+        || fail "the release could not be created"
 
 # MARK: - The archive is readable before the feed names it
 
