@@ -1,0 +1,34 @@
+name: Feature request
+description: An idea for what Hazmat could do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Hazmat deliberately does one job — editing `/etc/hosts` and switching
+        between named profiles — so requests that stay inside that job have
+        the best chance. Knowing the problem behind the idea helps more than
+        the idea alone.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that Hazmat does not let you, or makes harder than it should be?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like
+    validations:
+      required: true
+
+  - type: textarea
+    id: workaround
+    attributes:
+      label: What you do today
+      description: The workaround, if you have one, and what it costs you.
+    validations:
+      required: false
