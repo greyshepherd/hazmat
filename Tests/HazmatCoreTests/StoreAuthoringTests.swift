@@ -148,6 +148,20 @@ final class StoreAuthoringTests: XCTestCase {
         XCTAssertEqual(store.layout.fragments(), [FragmentID("base")])
     }
 
+    func testAStoreWhoseFirstFileWasAFragmentStillExists() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        let layout = store.layout
+
+        XCTAssertFalse(layout.exists, "nothing has created the store here")
+
+        XCTAssertEqual(try store.writer.save("127.0.0.1\tlocalhost\n", asFragment: FragmentID("base")), .wrote)
+
+        XCTAssertTrue(layout.exists, "a store that holds a fragment is a store, even with no profiles directory yet")
+        XCTAssertEqual(layout.fragments().map(\.rawValue), ["base"])
+        XCTAssertEqual(layout.profiles(), [])
+    }
+
     // MARK: - 2.2 Names are validated before anything is written
 
     func testANameOutsideTheGrammarIsRefusedAndLeavesNothingBehind() throws {

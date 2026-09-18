@@ -19,7 +19,6 @@ enum ResolvedViewMode: String, CaseIterable, Equatable {
 /// that use the selected fragment. It reads and shows; it never writes.
 struct DetailPane: View {
     @Bindable var model: ShellModel
-    @Environment(\.brand) private var palette
     @State private var mode: ResolvedViewMode = .text
 
     var body: some View {
@@ -33,7 +32,7 @@ struct DetailPane: View {
                     usedIn(editor, fragment)
                 case nil:
                     Text("Nothing is selected.")
-                        .foregroundStyle(palette.textSecondary.color)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding(16)
@@ -49,7 +48,7 @@ struct DetailPane: View {
             Text("Resolved")
                 .font(.title3)
                 .bold()
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Spacer()
             Picker("View", selection: $mode) {
                 ForEach(ResolvedViewMode.allCases, id: \.self) { mode in
@@ -81,7 +80,7 @@ struct DetailPane: View {
             let count = editor.entryCount
             Text("\(count) \(count == 1 ? "entry" : "entries")")
                 .font(.caption)
-                .foregroundStyle(palette.textSecondary.color)
+                .foregroundStyle(.secondary)
 
             switch mode {
             case .text:
@@ -92,7 +91,7 @@ struct DetailPane: View {
         }
 
         if !editor.displacements.isEmpty {
-            DisplacementsView(displacements: editor.displacements, palette: palette)
+            DisplacementsView(displacements: editor.displacements)
         }
     }
 
@@ -104,9 +103,9 @@ struct DetailPane: View {
             .textSelection(.enabled)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(10)
-            .background(palette.surface.color, in: RoundedRectangle(cornerRadius: 6))
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay {
-                RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border.color)
+                RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))
             }
     }
 
@@ -126,7 +125,7 @@ struct DetailPane: View {
             }
             TableColumn("Source") { row in
                 Text("\(row.entry.source.fragment.rawValue):\(row.entry.source.line)")
-                    .foregroundStyle(palette.textSecondary.color)
+                    .foregroundStyle(.secondary)
             }
         }
         .frame(minHeight: 220)
@@ -137,17 +136,14 @@ struct DetailPane: View {
             symbolName: "exclamationmark.triangle",
             word: message,
             tone: .danger,
-            palette: palette,
             font: .callout
         )
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     private func note(_ message: String) -> some View {
         Text(message)
             .font(.callout)
-            .foregroundStyle(palette.textSecondary.color)
-            .fixedSize(horizontal: false, vertical: true)
+            .foregroundStyle(.secondary)
     }
 
     // MARK: - A fragment's using profiles
@@ -159,47 +155,46 @@ struct DetailPane: View {
             Text("Used in")
                 .font(.title3)
                 .bold()
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Spacer()
             Text("\(users.count) \(users.count == 1 ? "profile" : "profiles")")
                 .font(.caption)
-                .foregroundStyle(palette.textSecondary.color)
+                .foregroundStyle(.secondary)
         }
 
         let entries = editor.entryCount(of: fragment) ?? 0
         Text("\(fragment) holds \(entries) \(entries == 1 ? "entry" : "entries").")
             .font(.caption)
-            .foregroundStyle(palette.textSecondary.color)
+            .foregroundStyle(.secondary)
 
         if users.isEmpty {
             StatusLabel(
                 symbolName: "questionmark.circle",
                 word: "No profile uses this fragment yet.",
                 tone: .neutral,
-                palette: palette
             )
         } else {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach(users, id: \.self) { profile in
                     HStack(spacing: 8) {
                         Image(systemName: "square.stack.3d.up")
-                            .foregroundStyle(palette.mark(.neutral).color)
+                            .foregroundStyle(.secondary)
                         Text(profile.rawValue)
-                            .foregroundStyle(palette.textPrimary.color)
+                            .foregroundStyle(.primary)
                         Spacer()
                         if editor.isApplied(profile) {
                             Label("Applied", systemImage: "checkmark.circle.fill")
                                 .font(.caption)
-                                .foregroundStyle(palette.text(.success).color)
+                                .foregroundStyle(.green)
                         }
                     }
                     .padding(.vertical, 2)
                 }
             }
             .padding(10)
-            .background(palette.surface.color, in: RoundedRectangle(cornerRadius: 6))
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay {
-                RoundedRectangle(cornerRadius: 6).strokeBorder(palette.border.color)
+                RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))
             }
         }
     }
@@ -214,23 +209,21 @@ struct EntryTableRow: Identifiable {
 /// The entries a later layer displaced, with both fragments named.
 struct DisplacementsView: View {
     let displacements: [Displacement]
-    let palette: BrandPalette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Overridden")
                 .font(.headline)
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Text("A later layer won these names.")
                 .font(.caption)
-                .foregroundStyle(palette.textSecondary.color)
+                .foregroundStyle(.secondary)
             ForEach(Array(displacements.enumerated()), id: \.offset) { pair in
                 Text(
                     "\(pair.element.name) — \(pair.element.address) from \(pair.element.source.fragment.rawValue):\(pair.element.source.line) overridden by \(pair.element.displacedBy.fragment.rawValue):\(pair.element.displacedBy.line)"
                 )
                 .font(.callout)
-                .foregroundStyle(palette.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

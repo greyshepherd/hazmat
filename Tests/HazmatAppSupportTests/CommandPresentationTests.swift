@@ -65,8 +65,8 @@ final class CommandPresentationTests: XCTestCase {
         let actions = Set(commands(fixture).menus.flatMap(\.items).map(\.action))
         let expected: Set<WindowAction> = [
             .createStore, .chooseLocation, .newProfile, .newFragment, .apply, .revert, .overwriteDrift,
-            .removeBlock, .reload, .rename, .duplicate, .delete, .save, .installHelper, .revealHostsFile,
-            .openSettings, .toggleSidebar, .search, .showHelp
+            .removeBlock, .reload, .rename, .duplicate, .delete, .save, .installHelper, .repairHelper,
+            .revealHostsFile, .openSettings, .toggleSidebar, .search, .showHelp
         ]
 
         XCTAssertEqual(actions, expected)
@@ -119,12 +119,24 @@ final class CommandPresentationTests: XCTestCase {
         let blocked = commands(fixture, helper: .notRegistered)
         XCTAssertTrue(blocked.item("apply")?.isEnabled == false, "a blocked write is not offered")
         XCTAssertTrue(blocked.item("install-helper")?.isEnabled == true)
+        XCTAssertFalse(
+            blocked.item("repair-helper")?.isEnabled == true,
+            "a helper that is not installed is installed, not repaired"
+        )
+
+        let notAnswering = commands(fixture, helper: .notAnswering)
+        XCTAssertFalse(
+            notAnswering.item("install-helper")?.isEnabled == true,
+            "a registered helper is not installed again"
+        )
+        XCTAssertTrue(notAnswering.item("repair-helper")?.isEnabled == true)
 
         let reverted = commands(fixture, canRevert: true)
         XCTAssertTrue(reverted.item("revert")?.isEnabled == true)
 
         let helperReady = commands(fixture, helper: .enabled)
         XCTAssertTrue(helperReady.item("install-helper")?.isEnabled == false, "an enabled helper needs no install item")
+        XCTAssertTrue(helperReady.item("repair-helper")?.isEnabled == false, "an enabled helper needs no repair")
     }
 
     func testSaveFollowsTheDraft() throws {

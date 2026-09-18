@@ -8,7 +8,6 @@ import SwiftUI
 struct HelperSheetView: View {
     @Bindable var model: ShellModel
     @Environment(\.dismiss) private var dismiss
-    @Environment(\.brand) private var palette
 
     var body: some View {
         let sheet: HelperSheetPresentation = model.helperSheet
@@ -17,67 +16,65 @@ struct HelperSheetView: View {
                 Text("The Hazmat Helper")
                     .font(.title3)
                     .bold()
-                    .foregroundStyle(palette.textPrimary.color)
+                    .foregroundStyle(.primary)
                 Spacer()
                 StatusLabel(
                     symbolName: sheet.current.symbolName,
                     word: sheet.current.label,
                     tone: sheet.current.tone,
-                    palette: palette
                 )
             }
 
             Text("Rewriting the hosts file needs administrator rights. The helper is a small background service that has them — and does nothing else.")
                 .font(.callout)
-                .foregroundStyle(palette.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(sheet.privileges) { privilege in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: "checkmark.shield")
-                            .foregroundStyle(palette.mark(.success).color)
+                            .foregroundStyle(.green)
                         Text(privilege.detail)
                             .font(.callout)
-                            .foregroundStyle(palette.textPrimary.color)
-                            .fixedSize(horizontal: false, vertical: true)
+                            .foregroundStyle(.primary)
                     }
                 }
             }
             .padding(12)
-            .background(palette.well.color, in: RoundedRectangle(cornerRadius: 8))
+            .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("States")
                     .font(.headline)
-                    .foregroundStyle(palette.textPrimary.color)
+                    .foregroundStyle(.primary)
                 ForEach(sheet.states) { note in
                     HStack(alignment: .top, spacing: 8) {
                         Image(systemName: note.state.symbolName)
-                            .foregroundStyle(palette.mark(note.state.tone).color)
+                            .foregroundStyle(note.state.tone.color)
                             .frame(width: 16)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(note.state.label)
                                 .font(.callout)
                                 .foregroundStyle(
                                     note.state == sheet.current
-                                        ? palette.text(note.state.tone).color
-                                        : palette.textSecondary.color
+                                        ? note.state.tone.color
+                                        : .secondary
                                 )
                             Text(note.detail)
                                 .font(.caption)
-                                .foregroundStyle(palette.textSecondary.color)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
             }
 
             HStack(spacing: 8) {
-                if sheet.current.canWrite {
+                if sheet.current == .notAnswering {
+                    PrimaryActionButton(action: .repairHelper) { _ in model.repairHelper() }
+                } else if sheet.current.canWrite {
                     Button("Unregister the Helper") { model.unregister() }
                 } else {
-                    PrimaryActionButton(action: .installHelper, palette: palette) { _ in model.register() }
+                    PrimaryActionButton(action: .installHelper) { _ in model.register() }
                 }
                 if sheet.current == .awaitingApproval {
                     Button("Open Login Items Settings") { model.openLoginItemsSettings() }

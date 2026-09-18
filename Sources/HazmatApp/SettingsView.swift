@@ -6,13 +6,12 @@ import SwiftUI
 /// the action that resolves it.
 struct SettingsView: View {
     @Bindable var model: ShellModel
-    @Environment(\.brand) private var palette
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             Text("Store")
                 .font(.headline)
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
 
             LabeledContent("Location") {
                 HStack(spacing: 8) {
@@ -30,9 +29,7 @@ struct SettingsView: View {
                     symbolName: "exclamationmark.triangle",
                     word: "The environment names a store root, which overrides the chosen location.",
                     tone: .warning,
-                    palette: palette
                 )
-                .fixedSize(horizontal: false, vertical: true)
             }
 
             HStack(spacing: 8) {
@@ -46,19 +43,17 @@ struct SettingsView: View {
 
             Text("Helper")
                 .font(.headline)
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
 
             HStack(alignment: .top, spacing: 8) {
                 StatusLabel(
                     symbolName: model.helper.symbolName,
                     word: model.helper.label,
                     tone: model.helper.tone,
-                    palette: palette
                 )
                 Text(model.helper.summary)
                     .font(.caption)
-                    .foregroundStyle(palette.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(.secondary)
             }
 
             HStack(spacing: 8) {
@@ -75,8 +70,7 @@ struct SettingsView: View {
             if !model.notice.isEmpty {
                 Text(model.notice)
                     .font(.caption)
-                    .foregroundStyle(palette.textSecondary.color)
-                    .fixedSize(horizontal: false, vertical: true)
+                    .foregroundStyle(.secondary)
             }
 
             Spacer(minLength: 0)

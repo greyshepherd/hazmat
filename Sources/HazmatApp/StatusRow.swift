@@ -6,7 +6,6 @@ import SwiftUI
 /// there is one, and the revert when an apply this session can still be undone.
 struct StatusRow: View {
     @Bindable var model: ShellModel
-    @Environment(\.brand) private var palette
 
     var body: some View {
         let write: WriteState = model.writeState
@@ -15,17 +14,16 @@ struct StatusRow: View {
                 symbolName: write.symbolName,
                 word: write.label,
                 tone: write.tone,
-                palette: palette
             )
             VStack(alignment: .leading, spacing: 1) {
                 Text(write.detail)
                     .font(.caption)
-                    .foregroundStyle(palette.textSecondary.color)
+                    .foregroundStyle(.secondary)
                     .lineLimit(2)
                 if !model.notice.isEmpty {
                     Text(model.notice)
                         .font(.caption)
-                        .foregroundStyle(palette.textSecondary.color)
+                        .foregroundStyle(.secondary)
                         .lineLimit(2)
                 }
             }
@@ -38,13 +36,13 @@ struct StatusRow: View {
                 Button(WindowAction.revert.title) { model.requestRevert() }
             }
             if model.primaryAction == .apply {
-                PrimaryActionButton(action: .apply, palette: palette) { model.perform($0) }
+                PrimaryActionButton(action: .apply) { model.perform($0) }
                     .controlSize(.regular)
             }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(palette.bar.color)
+        .background(.bar)
         .overlay(alignment: .top) { Divider() }
     }
 }

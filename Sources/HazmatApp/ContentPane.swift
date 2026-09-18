@@ -7,72 +7,47 @@ import SwiftUI
 /// most one prominent action.
 struct ContentPane: View {
     @Bindable var model: ShellModel
-    @Environment(\.brand) private var palette
 
     var body: some View {
-        let editor: EditorPresentation = model.editor
         VStack(alignment: .leading, spacing: 0) {
-            content(editor)
+            content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .safeAreaInset(edge: .bottom) { StatusRow(model: model) }
-        .sheet(isPresented: $model.isAddingLayer) {
-            AddLayerSheet(model: model)
-        }
     }
 
+    /// The selected item, or the phase when there is nothing to edit. The
+    /// selection is asked first, so an item the sidebar shows is always
+    /// editable, whatever the phase the store is in.
     @ViewBuilder
-    private func content(_ editor: EditorPresentation) -> some View {
-        switch model.phase {
-        case .noStore:
+    private var content: some View {
+        switch model.content {
+        case .fragment(let fragment):
+            FragmentEditor(model: model, fragment: fragment)
+        case .profile(let profile):
+            LayerStackPane(model: model, profile: profile)
+        case .phase(.noStore):
             NoStorePane(model: model)
-        case .noProfiles:
-            PhasePane(
-                phase: model.phase,
-                action: model.primaryAction,
-                palette: palette,
-                perform: { model.perform($0) }
-            )
-        default:
-            switch editor.selection {
-            case .fragment(let fragment):
-                FragmentEditor(model: model, fragment: fragment)
-            case .profile(let profile):
-                LayerStackPane(model: model, profile: profile)
-            case nil:
-                PhasePane(
-                    phase: model.phase,
-                    action: model.primaryAction,
-                    palette: palette,
-                    perform: { model.perform($0) }
-                )
-            }
+        case .phase(let phase):
+            PhasePane(phase: phase)
         }
     }
 }
 
-/// A phase with nothing to edit: what the phase means, and its one prominent
-/// action.
+/// A phase with nothing to edit: what the phase means. The action that fills
+/// it lives in the sidebar section or the toolbar it belongs to.
 struct PhasePane: View {
     let phase: WindowPhase
-    let action: WindowAction?
-    let palette: BrandPalette
-    let perform: (WindowAction) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text(phase.title)
                 .font(.title3)
                 .bold()
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Text(phase.explanation)
                 .font(.callout)
-                .foregroundStyle(palette.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
-            if let action {
-                PrimaryActionButton(action: action, palette: palette, perform: perform)
-            }
-            Spacer(minLength: 0)
+                .foregroundStyle(.secondary)
         }
         .padding(20)
         .frame(maxWidth: 520, alignment: .leading)
@@ -84,7 +59,6 @@ struct PhasePane: View {
 /// from here to a written block, and creating it as the only prominent action.
 struct NoStorePane: View {
     @Bindable var model: ShellModel
-    @Environment(\.brand) private var palette
 
     private var steps: [(String, String)] {
         [
@@ -99,21 +73,20 @@ struct NoStorePane: View {
             Text("No store yet")
                 .font(.title3)
                 .bold()
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Text("A store is a folder that holds your profiles and fragments. Nothing is written to the hosts file until you ask.")
                 .font(.callout)
-                .foregroundStyle(palette.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(.secondary)
 
             VStack(alignment: .leading, spacing: 6) {
                 Text("Location")
                     .font(.caption)
-                    .foregroundStyle(palette.textSecondary.color)
+                    .foregroundStyle(.secondary)
                 HStack(spacing: 8) {
                     Text(model.storeRoot.path)
                         .font(.system(.callout, design: .monospaced))
                         .textSelection(.enabled)
-                        .foregroundStyle(palette.textPrimary.color)
+                        .foregroundStyle(.primary)
                     Button {
                         model.copyStorePath()
                     } label: {
@@ -129,25 +102,23 @@ struct NoStorePane: View {
                     HStack(alignment: .top, spacing: 8) {
                         Text("\(index + 1).")
                             .font(.system(.callout, design: .monospaced))
-                            .foregroundStyle(palette.textSecondary.color)
+                            .foregroundStyle(.secondary)
                         VStack(alignment: .leading, spacing: 1) {
                             Text(step.0)
                                 .font(.callout)
-                                .foregroundStyle(palette.textPrimary.color)
+                                .foregroundStyle(.primary)
                             Text(step.1)
                                 .font(.caption)
-                                .foregroundStyle(palette.textSecondary.color)
-                                .fixedSize(horizontal: false, vertical: true)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
             }
 
             HStack(spacing: 8) {
-                PrimaryActionButton(action: .createStore, palette: palette) { model.perform($0) }
+                PrimaryActionButton(action: .createStore) { model.perform($0) }
                 Button(WindowAction.chooseLocation.title) { model.perform(.chooseLocation) }
             }
-            Spacer(minLength: 0)
         }
         .padding(20)
         .frame(maxWidth: 620, alignment: .leading)
@@ -160,7 +131,6 @@ struct NoStorePane: View {
 struct FragmentEditor: View {
     @Bindable var model: ShellModel
     let fragment: FragmentID
-    @Environment(\.brand) private var palette
     @State private var nameDraft = ""
 
     var body: some View {
@@ -170,12 +140,12 @@ struct FragmentEditor: View {
                 Text("Fragment")
                     .font(.title3)
                     .bold()
-                    .foregroundStyle(palette.textPrimary.color)
+                    .foregroundStyle(.primary)
                 Spacer()
                 if model.fragmentIsDirty {
-                    StatusLabel(symbolName: "pencil", word: "Unsaved changes", tone: .warning, palette: palette)
+                    StatusLabel(symbolName: "pencil", word: "Unsaved changes", tone: .warning)
                 } else {
-                    StatusLabel(symbolName: "checkmark.circle", word: "Saved", tone: .success, palette: palette)
+                    StatusLabel(symbolName: "checkmark.circle", word: "Saved", tone: .success)
                 }
             }
 
@@ -194,17 +164,17 @@ struct FragmentEditor: View {
             LabeledContent("Entries") {
                 let count = editor.entryCount(of: fragment) ?? 0
                 Text("\(count) \(count == 1 ? "entry" : "entries")")
-                    .foregroundStyle(palette.textSecondary.color)
+                    .foregroundStyle(.secondary)
             }
 
             TextEditor(text: $model.fragmentDraft)
                 .font(.system(.body, design: .monospaced))
                 .frame(minHeight: 220)
                 .scrollContentBackground(.hidden)
-                .background(palette.surface.color, in: RoundedRectangle(cornerRadius: 6))
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                 .overlay {
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(palette.border.color)
+                        .strokeBorder(Color(nsColor: .separatorColor))
                 }
 
             HStack(spacing: 8) {
@@ -213,7 +183,7 @@ struct FragmentEditor: View {
                 Spacer()
                 Text("Saved edits to the applied profile re-apply its block.")
                     .font(.caption)
-                    .foregroundStyle(palette.textSecondary.color)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(16)
@@ -225,7 +195,6 @@ struct FragmentEditor: View {
 struct LayerStackPane: View {
     @Bindable var model: ShellModel
     let profile: ProfileID
-    @Environment(\.brand) private var palette
 
     var body: some View {
         let editor: EditorPresentation = model.editor
@@ -234,9 +203,9 @@ struct LayerStackPane: View {
                 Text("Layers")
                     .font(.title3)
                     .bold()
-                    .foregroundStyle(palette.textPrimary.color)
+                    .foregroundStyle(.primary)
                 Text(profile.rawValue)
-                    .foregroundStyle(palette.textSecondary.color)
+                    .foregroundStyle(.secondary)
                 Spacer()
                 if !editor.fragmentRows.isEmpty {
                     Menu("Add a Fragment") {
@@ -252,7 +221,7 @@ struct LayerStackPane: View {
 
             Text("Layers are applied in order, and a later layer wins a conflict. Drag a layer to reorder it.")
                 .font(.caption)
-                .foregroundStyle(palette.textSecondary.color)
+                .foregroundStyle(.secondary)
 
             if editor.layerRows.isEmpty {
                 emptyLayers
@@ -269,13 +238,12 @@ struct LayerStackPane: View {
                 .listStyle(.inset)
                 .frame(minHeight: 200)
                 .scrollContentBackground(.hidden)
-                .background(palette.surface.color, in: RoundedRectangle(cornerRadius: 6))
+                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
                 .overlay {
                     RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(palette.border.color)
+                        .strokeBorder(Color(nsColor: .separatorColor))
                 }
             }
-            Spacer(minLength: 0)
         }
         .padding(16)
     }
@@ -284,14 +252,14 @@ struct LayerStackPane: View {
         HStack(spacing: 10) {
             Text("\(row.position).")
                 .font(.system(.callout, design: .monospaced))
-                .foregroundStyle(palette.textSecondary.color)
+                .foregroundStyle(.secondary)
                 .frame(width: 22, alignment: .trailing)
             Text(row.fragment.rawValue)
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Spacer(minLength: 4)
             Text("\(row.entryCount) \(row.entryCount == 1 ? "entry" : "entries")")
                 .font(.caption)
-                .foregroundStyle(palette.textSecondary.color)
+                .foregroundStyle(.secondary)
             Button {
                 model.removeLayer(at: row.position - 1)
             } label: {
@@ -310,83 +278,13 @@ struct LayerStackPane: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("No layers yet")
                 .font(.headline)
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Text("Layers are applied in order and a later layer wins a conflict. Adding a fragment is the first step.")
                 .font(.callout)
-                .foregroundStyle(palette.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
-            if model.primaryAction == .addFragment {
-                PrimaryActionButton(action: .addFragment, palette: palette) { model.perform($0) }
-            } else if model.primaryAction == .newFragment {
-                PrimaryActionButton(action: .newFragment, palette: palette) { model.perform($0) }
-            } else if !model.editor.fragmentRows.isEmpty {
-                Button(WindowAction.addFragment.title) { model.perform(.addFragment) }
-            } else {
-                Button(WindowAction.newFragment.title) { model.perform(.newFragment) }
-            }
+                .foregroundStyle(.secondary)
         }
         .frame(maxWidth: 520, alignment: .leading)
         .padding(12)
-        .background(palette.well.color, in: RoundedRectangle(cornerRadius: 8))
-    }
-}
-
-/// The sheet that adds a fragment to the selected profile, shown by the
-/// prominent action of a profile with no layers.
-struct AddLayerSheet: View {
-    @Bindable var model: ShellModel
-    @Environment(\.dismiss) private var dismiss
-    @Environment(\.brand) private var palette
-
-    var body: some View {
-        let editor: EditorPresentation = model.editor
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Add a Fragment")
-                .font(.title3)
-                .bold()
-                .foregroundStyle(palette.textPrimary.color)
-            Text("The layer is appended to the stack, so it wins a conflict with the layers above it.")
-                .font(.callout)
-                .foregroundStyle(palette.textSecondary.color)
-
-            if editor.fragmentRows.isEmpty {
-                Text("The store holds no fragments yet.")
-                    .foregroundStyle(palette.textSecondary.color)
-                Button(WindowAction.newFragment.title) {
-                    dismiss()
-                    model.beginCreate(.newFragment)
-                }
-            } else {
-                List(editor.fragmentRows) { row in
-                    Button {
-                        dismiss()
-                        model.addLayer(row.fragment)
-                    } label: {
-                        HStack {
-                            Text(row.fragment.rawValue)
-                                .foregroundStyle(palette.textPrimary.color)
-                            Spacer()
-                            Text("\(row.entryCount) \(row.entryCount == 1 ? "entry" : "entries")")
-                                .font(.caption)
-                                .foregroundStyle(palette.textSecondary.color)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-                .frame(minHeight: 180)
-            }
-
-            HStack {
-                Button(WindowAction.newFragment.title) {
-                    dismiss()
-                    model.beginCreate(.newFragment)
-                }
-                Spacer()
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
-            }
-        }
-        .padding(20)
-        .frame(width: 420)
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }

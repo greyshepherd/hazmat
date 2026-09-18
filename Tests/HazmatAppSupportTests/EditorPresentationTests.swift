@@ -142,20 +142,6 @@ final class EditorPresentationTests: XCTestCase {
         XCTAssertTrue(presentation.profileRows.isEmpty)
     }
 
-    func testAScopeNarrowsOneSection() throws {
-        let fixture = try twoLayerFixture()
-        defer { fixture.remove() }
-        let model = fixture.model(writer: UnregisteredHelper())
-
-        let fragmentsOnly = model.read(selection: .profile(work), search: StoreSearch(text: "base", scope: .fragments))
-        XCTAssertEqual(fragmentsOnly.fragmentRows.map(\.fragment), [base])
-        XCTAssertTrue(fragmentsOnly.profileRows.isEmpty)
-
-        let profilesOnly = model.read(selection: .profile(work), search: StoreSearch(text: "work", scope: .profiles))
-        XCTAssertEqual(profilesOnly.profileRows.map(\.profile), [work])
-        XCTAssertTrue(profilesOnly.fragmentRows.isEmpty)
-    }
-
     func testClearingTheSearchListsEverythingAgain() throws {
         let fixture = try twoLayerFixture()
         defer { fixture.remove() }
@@ -195,6 +181,60 @@ final class EditorPresentationTests: XCTestCase {
 
         XCTAssertEqual(presentation.selection, .profile(other))
         XCTAssertEqual(presentation.selectedProfile, other)
+    }
+
+    // MARK: - What fills the content pane
+
+    func testTheContentPaneEditsTheSelectedItemWhateverThePhase() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        let model = fixture.model(writer: UnregisteredHelper())
+
+        let profile = model.read(selection: .profile(work))
+        XCTAssertEqual(profile.content(phase: .changesPending), .profile(work))
+
+        let fragment = model.read(selection: .fragment(base))
+        XCTAssertEqual(fragment.content(phase: .inSync), .fragment(base))
+    }
+
+    func testAFragmentInAStoreWithNoProfilesStillFillsTheContentPane() throws {
+        let store = try TemporaryStore()
+        let root = store.root
+        store.remove()
+        let live = try LiveFile("127.0.0.1\tlocalhost\n")
+        defer { live.remove() }
+        let model = EditorModel(storeRoot: root, fileURL: live.url, writer: UnregisteredHelper())
+        XCTAssertEqual(model.createFragment(named: "base").store, .success(.wrote))
+
+        let presentation = model.read(selection: .fragment(base))
+
+        XCTAssertEqual(presentation.content(phase: .noProfiles), .fragment(base))
+        XCTAssertEqual(
+            presentation.content(phase: .noStore),
+            .fragment(base),
+            "an item the store holds is edited even when the phase still says no store"
+        )
+    }
+
+    func testThePhaseFillsTheContentPaneWhenNothingIsSelected() throws {
+        let store = try TemporaryStore()
+        let root = store.root
+        store.remove()
+        let live = try LiveFile("127.0.0.1\tlocalhost\n")
+        defer { live.remove() }
+        let model = EditorModel(storeRoot: root, fileURL: live.url, writer: UnregisteredHelper())
+
+        XCTAssertEqual(model.read().content(phase: .noStore), .phase(.noStore))
+    }
+
+    func testASearchThatHidesTheSelectionLeavesThePhaseInTheContentPane() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        let model = fixture.model(writer: UnregisteredHelper())
+
+        let presentation = model.read(selection: .profile(work), search: StoreSearch(text: "project"))
+
+        XCTAssertEqual(presentation.content(phase: .nothingSelected), .phase(.nothingSelected))
     }
 
     // MARK: - 5.5 The window's subtitle

@@ -33,6 +33,12 @@ public enum HazmatWriteStatus: Int32, Sendable {
 /// plan was based on; it never carries a target path, a profile, or a fragment.
 /// Removal carries no bytes: the privileged side strips the block itself.
 @objc public protocol HazmatDaemonXPC {
+    /// Whether the daemon is there. Carries no request and answers nothing but
+    /// its own arrival, which is what separates a registered helper from one
+    /// that answers. A daemon the system can no longer start never replies, so
+    /// the client's own bound is what reports it.
+    func checkIn(withReply reply: @escaping () -> Void)
+
     func writeFileBytes(
         _ bytes: Data,
         baselineDigest: Data,

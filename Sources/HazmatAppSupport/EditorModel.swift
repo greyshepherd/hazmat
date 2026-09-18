@@ -367,14 +367,19 @@ public struct EditorModel: Sendable {
 
     /// Saves the fragment's text, then re-applies the profile when its block is
     /// live and is still the block that profile rendered before the edit.
+    /// `profile` is `nil` when the store holds none: the text is saved and there
+    /// is nothing to re-apply.
     @discardableResult
     public func save(
         fragment: FragmentID,
         text: String,
-        editing profile: ProfileID,
+        editing profile: ProfileID?,
         previous: EditorPresentation
     ) -> EditorOutcome {
-        writing(profile: profile, previous: previous) {
+        guard let profile else {
+            return plain { try storeWriter.save(text, asFragment: fragment) }
+        }
+        return writing(profile: profile, previous: previous) {
             try storeWriter.save(text, asFragment: fragment)
         }
     }

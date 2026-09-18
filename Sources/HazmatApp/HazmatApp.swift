@@ -9,7 +9,7 @@ struct HazmatApp: App {
     @State private var model = ShellModel()
 
     var body: some Scene {
-        WindowGroup("Hazmat", id: Self.windowID) {
+        Window("Hazmat", id: Self.windowID) {
             ShellView(model: model)
         }
         .defaultSize(width: 1080, height: 700)

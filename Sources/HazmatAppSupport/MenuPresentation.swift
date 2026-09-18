@@ -14,6 +14,8 @@ public struct MenuPresentation: Equatable, Sendable {
         case overwriteDrift(ProfileID, liveBlock: Data)
         case turnOff
         case registerHelper
+        /// Remove the registration and register the helper again.
+        case repairHelper
     }
 
     public struct Item: Equatable, Sendable, Identifiable {
@@ -95,9 +97,18 @@ public struct MenuPresentation: Equatable, Sendable {
         sections.append(
             Section(id: "off", items: [items.item("Turn Hazmat Off", .turnOff)])
         )
-        if !helper.canWrite {
+        if let remedy = helper.remedy {
+            let repairing = remedy == .repairHelper
             sections.append(
-                Section(id: "helper", items: [items.item("Register Helper", .registerHelper)])
+                Section(
+                    id: "helper",
+                    items: [
+                        items.item(
+                            repairing ? "Repair Helper" : "Register Helper",
+                            repairing ? .repairHelper : .registerHelper
+                        )
+                    ]
+                )
             )
         }
 

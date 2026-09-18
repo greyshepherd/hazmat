@@ -117,7 +117,7 @@ final class WindowPhaseTests: XCTestCase {
         )
         let empty = EditorModel(storeRoot: emptyStore.root, fileURL: live.url, writer: UnregisteredHelper()).read()
         XCTAssertEqual(WindowPhase(editor: empty, helper: .enabled), .noProfiles)
-        XCTAssertEqual(action(empty, .enabled), .newProfile)
+        XCTAssertNil(action(empty, .enabled), "the sidebar's own New Profile fills this, so the phase promotes nothing")
 
         // The phases a built store produces, each with its own helper state.
         let layered = try fixture()
@@ -138,7 +138,7 @@ final class WindowPhaseTests: XCTestCase {
         defer { layering.remove() }
         let withoutLayers = layering.model(writer: UnregisteredHelper()).read(selection: .profile(work))
         XCTAssertEqual(WindowPhase(editor: withoutLayers, helper: .enabled), .profileWithoutLayers)
-        XCTAssertEqual(action(withoutLayers, .enabled), .addFragment)
+        XCTAssertNil(action(withoutLayers, .enabled), "the pane's fragment menu adds a layer, so the phase promotes nothing")
 
         let hidden = model.read(selection: .profile(work), search: StoreSearch(text: "nothing matches this"))
         XCTAssertEqual(WindowPhase(editor: hidden, helper: .enabled), .nothingSelected)

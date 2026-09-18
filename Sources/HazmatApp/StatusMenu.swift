@@ -57,6 +57,8 @@ struct StatusMenu: View {
             model.removeBlock()
         case .registerHelper:
             model.register()
+        case .repairHelper:
+            model.repairHelper()
         }
     }
 }

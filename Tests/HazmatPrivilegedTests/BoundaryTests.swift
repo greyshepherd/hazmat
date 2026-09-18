@@ -16,7 +16,7 @@ final class BoundaryTests: XCTestCase {
         var methodCount: UInt32 = 0
         let methods = try XCTUnwrap(protocol_copyMethodDescriptionList(protocolObject, true, true, &methodCount))
         defer { free(methods) }
-        XCTAssertEqual(methodCount, 2)
+        XCTAssertEqual(methodCount, 3)
 
         var encodings: [String: String] = [:]
         for index in 0..<Int(methodCount) {
@@ -30,14 +30,35 @@ final class BoundaryTests: XCTestCase {
 
         XCTAssertEqual(
             Set(encodings.keys),
-            ["writeFileBytes:baselineDigest:withReply:", "removeManagedBlock:withReply:"]
+            ["writeFileBytes:baselineDigest:withReply:", "removeManagedBlock:withReply:", "checkInWithReply:"]
         )
         // void return, self, _cmd, then the parameters. The write carries exactly
         // two objects - the bytes and the state they were planned from - and the
-        // removal exactly one; both reply with a block. A parameter that named a
-        // path or a profile would have to appear here.
+        // removal exactly one; both reply with a block. The check carries no
+        // request at all: it is answered by the daemon being there to answer it.
+        // A parameter that named a path or a profile would have to appear here.
         XCTAssertEqual(argumentTypes(of: encodings["writeFileBytes:baselineDigest:withReply:"]), ["v", "@", ":", "@", "@", "@?"])
         XCTAssertEqual(argumentTypes(of: encodings["removeManagedBlock:withReply:"]), ["v", "@", ":", "@", "@?"])
+        XCTAssertEqual(argumentTypes(of: encodings["checkInWithReply:"]), ["v", "@", ":", "@?"])
+    }
+
+    func testTheCheckAnswersAndTouchesNothing() throws {
+        let directory = try TemporaryDirectory()
+        defer { directory.remove() }
+        let live = appliedHosts()
+        try directory.write(live)
+
+        let service = DaemonService(
+            handler: DaemonWriteHandler(
+                service: PrivilegedWriteService(target: directory.target, owner: testOwnership())
+            )
+        )
+
+        var answered = false
+        service.checkIn { answered = true }
+
+        XCTAssertTrue(answered, "the check is answered by the daemon being there")
+        XCTAssertEqualBytes(try directory.contents(), live)
     }
 
     func testTheStatusesAreSharedByBothSides() {

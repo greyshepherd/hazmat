@@ -107,7 +107,7 @@ not something a user should have to version.
 The editor presentation gains the hosts file path, entry and layer counts,
 per-layer counts, the profiles that use the selected fragment, the write state,
 modal actions (new, rename, duplicate, delete, save, apply, revert, install
-helper) and the search results for a text and scope the shell model holds. The
+helper) and the search results for the search text the shell model holds. The
 alternative — handing the view core types such as the store layout or the
 composition — is what the isolation tests forbid, and keeping search out of the
 view is what makes "the selection survives while it matches" testable.

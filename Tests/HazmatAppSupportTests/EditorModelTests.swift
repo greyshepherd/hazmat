@@ -61,6 +61,24 @@ final class EditorModelTests: XCTestCase {
         XCTAssertTrue(presentation.actions.contains(.newFragment))
     }
 
+    func testAStoreThatHoldsOnlyAFragmentStillReadsAsAStore() throws {
+        let store = try TemporaryStore()
+        let root = store.root
+        store.remove()
+        let live = try LiveFile("127.0.0.1\tlocalhost\n")
+        defer { live.remove() }
+        let model = EditorModel(storeRoot: root, fileURL: live.url, writer: UnregisteredHelper())
+        XCTAssertEqual(model.createFragment(named: "base").store, .success(.wrote))
+
+        let presentation = model.read()
+
+        XCTAssertTrue(presentation.storeExists, "the store holds the fragment that was just created")
+        XCTAssertEqual(presentation.profiles, [])
+        XCTAssertEqual(presentation.fragments, [base])
+        XCTAssertEqual(presentation.selection, .fragment(base))
+        XCTAssertEqual(presentation.fragmentText, "")
+    }
+
     func testTheSelectedFragmentsTextIsLoadedFromTheStore() throws {
         let fixture = try stackedFixture()
         defer { fixture.remove() }
@@ -323,6 +341,31 @@ final class EditorModelTests: XCTestCase {
         XCTAssertTrue(outcome.description.contains("not registered"), outcome.description)
         XCTAssertEqual(try fixture.live.state(), liveBefore)
         XCTAssertEqual(try fixture.text("fragments/base.hosts"), "127.0.0.1\tchanged.example\n")
+    }
+
+    func testASavedFragmentInAStoreWithNoProfileReachesTheStoreAlone() throws {
+        let store = try TemporaryStore()
+        let root = store.root
+        store.remove()
+        let live = try LiveFile("127.0.0.1\tlocalhost\n")
+        defer { live.remove() }
+        let helper = UnregisteredHelper()
+        let model = EditorModel(storeRoot: root, fileURL: live.url, writer: helper)
+        let liveBefore = try live.state()
+        XCTAssertEqual(model.createFragment(named: "base").store, .success(.wrote))
+
+        let outcome = model.save(
+            fragment: base,
+            text: "127.0.0.1\tchanged.example\n",
+            editing: nil,
+            previous: model.read(selection: .fragment(base))
+        )
+
+        XCTAssertEqual(outcome.store, .success(.wrote))
+        XCTAssertNil(outcome.apply, "a store with no profile has no block to re-apply")
+        XCTAssertEqual(helper.requests, 0, "authoring must not ask the helper for anything")
+        XCTAssertEqual(try store.text("fragments/base.hosts"), "127.0.0.1\tchanged.example\n")
+        XCTAssertEqual(try live.state(), liveBefore)
     }
 
     // MARK: - 3.5 The model needs no helper

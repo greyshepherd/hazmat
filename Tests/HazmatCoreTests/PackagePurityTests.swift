@@ -40,15 +40,17 @@ final class PackagePurityTests: XCTestCase {
         XCTAssertTrue(source.contains("func removeBlock(baseline: Data)"), source)
     }
 
-    func testTheXPCInterfaceCarriesNoMethodThisChangeAdded() throws {
+    /// The two requests the boundary knows, plus the check that asks nothing.
+    func testTheXPCInterfaceCarriesTheRequestsAndNothingElse() throws {
         let source = try String(contentsOf: repositoryRoot().appendingPathComponent("Sources/HazmatProtocol/HazmatIdentity.swift"), encoding: .utf8)
         let body = try XCTUnwrap(
             source.components(separatedBy: "protocol HazmatDaemonXPC {").last?.components(separatedBy: "\n}").first
         )
 
-        XCTAssertEqual(body.components(separatedBy: "func ").count - 1, 2, body)
+        XCTAssertEqual(body.components(separatedBy: "func ").count - 1, 3, body)
         XCTAssertTrue(body.contains("func writeFileBytes("), body)
         XCTAssertTrue(body.contains("func removeManagedBlock("), body)
+        XCTAssertTrue(body.contains("func checkIn(withReply"), body)
     }
 
     func testThePrivilegedSideStillKnowsNothingAboutProfilesOrTheMenu() throws {

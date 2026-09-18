@@ -113,6 +113,25 @@ public struct EditorPresentation: Equatable, Sendable {
         case overwriteDrift(ProfileID, liveBlock: Data)
     }
 
+    /// What the content pane shows. The selected item wins: a store that holds
+    /// only fragments still edits the selected fragment, so no phase can hide
+    /// it. The phase fills the pane when nothing is selected.
+    public enum Content: Equatable, Sendable {
+        case fragment(FragmentID)
+        case profile(ProfileID)
+        case phase(WindowPhase)
+    }
+
+    /// The item the content pane edits, or the phase when there is nothing to
+    /// edit.
+    public func content(phase: WindowPhase) -> Content {
+        switch selection {
+        case .fragment(let fragment): return .fragment(fragment)
+        case .profile(let profile): return .profile(profile)
+        case nil: return .phase(phase)
+        }
+    }
+
     /// Where the store lives, for the window to name.
     public let storePath: String
     /// The live file, so a confirmation can name what it would write.

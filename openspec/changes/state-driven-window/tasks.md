@@ -7,7 +7,7 @@
 - [x] 1.3 Add the hosts file path, the entry count and the layer count to the editor presentation; verify with tests against a two-layer profile and with the existing presentation tests still passing
 - [x] 1.4 Add the number of entries each layer contributes to the layer list; verify with a fixture whose two layers contribute different entry counts
 - [x] 1.5 Add the profiles that use the selected fragment; verify a fragment referenced by two profiles and a fragment referenced by none
-- [x] 1.6 Add search text and scope to the shell model and the matching profiles and fragments to the presentation, including the rule that a selected item stays selected while it matches and nothing is selected when it does not; verify with tests for a match, a hidden selection and a cleared search
+- [x] 1.6 Add search text to the shell model and the matching profiles and fragments to the presentation, including the rule that a selected item stays selected while it matches and nothing is selected when it does not; verify with tests for a match, a hidden selection and a cleared search
 
 ## 2. Store location and creation
 
@@ -37,7 +37,7 @@
 ## 5. Commands, search, settings and the shell
 
 - [x] 5.1 Add a commands value carrying the menu bar (File, Edit, Profiles, Fragments, Hosts, Window, Help) and the shortcuts, calling the one shell model; verify each command from the menu bar with the window closed where it applies
-- [x] 5.2 Add the sidebar search field with profile and fragment scopes bound to the shell model's search state; verify a search narrows both sections, a scope narrows one, and clearing restores the full lists
+- [x] 5.2 Add the sidebar search field bound to the shell model's search state; verify a search narrows both sections and clearing restores the full lists
 - [x] 5.3 Add a settings scene with the store location, the folder chooser, the helper state and its install action; verify a location change re-reads the store and that the settings command opens it
 - [x] 5.4 Add the helper install sheet reachable from the first-run phase and from the sidebar footer, with the three privileges the helper holds and the states it can be in; verify registration, awaiting approval and enabled
 - [x] 5.5 Set the window's title and subtitle (application name, selected profile, its entry and layer counts), the default size, the content minimum and size restoration; verify the default on a fresh launch, a restored size, the minimum, and the subtitle's counts

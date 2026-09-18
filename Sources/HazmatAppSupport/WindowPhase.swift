@@ -42,8 +42,8 @@ public enum WindowPhase: Equatable, Sendable {
     public func primaryAction(write: WriteState, helper: HelperState) -> WindowAction? {
         switch self {
         case .noStore: return .createStore
-        case .noProfiles: return .newProfile
-        case .profileWithoutLayers: return .addFragment
+        case .noProfiles: return nil
+        case .profileWithoutLayers: return nil
         case .changesPending: return .apply
         case .blocked: return write.remedy ?? (helper.canWrite ? nil : .installHelper)
         case .inSync, .nothingSelected: return nil

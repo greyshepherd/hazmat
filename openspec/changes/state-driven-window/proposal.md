@@ -76,7 +76,7 @@ window is the last surface that does not reflect what the app can do.
   gains a Settings scene and menu commands.
 - `HazmatAppSupport`: the editor presentation gains the hosts file path, entry
   and layer counts, per-layer counts, a fragment's using profiles, search text
-  and scope, and a write state; the shell model gains store creation, a
+  and a write state; the shell model gains store creation, a
   re-pointable store root, and revert.
 - `HazmatCore`: store location resolution (chosen, environment, default) and
   explicit store creation. Composition, block rendering and splicing are

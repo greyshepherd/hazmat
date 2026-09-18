@@ -106,9 +106,9 @@ displaced entries and problems, and MUST write nothing while it is shown.
 
 ### Requirement: Search narrows the store without hiding the selection
 
-The window MUST filter the sidebar's profiles and fragments by the search text and
-scope, MUST keep the selected item selected while it still matches, and MUST
-select nothing rather than a hidden item when it does not.
+The window MUST filter the sidebar's profiles and fragments by the search text,
+MUST keep the selected item selected while it still matches, and MUST select
+nothing rather than a hidden item when it does not.
 
 #### Scenario: The selection survives a search
 - **WHEN** the selected fragment matches the search text

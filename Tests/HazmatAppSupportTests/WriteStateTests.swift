@@ -119,6 +119,22 @@ final class WriteStateTests: XCTestCase {
         }
     }
 
+    /// A helper that is registered and approved but does not answer is repaired,
+    /// not installed: installing it again is refused as already registered.
+    func testAPendingWriteIsBlockedByAHelperThatDoesNotAnswerAndOffersTheRepair() throws {
+        let fixture = try fixture()
+        defer { fixture.remove() }
+
+        let state = writeState(fixture, helper: .notAnswering)
+
+        guard case .blocked(let cause, let remedy) = state else {
+            return XCTFail("expected blocked, got \(state)")
+        }
+        XCTAssertTrue(cause.contains("helper"), cause)
+        XCTAssertTrue(cause.contains("did not answer"), cause)
+        XCTAssertEqual(remedy, .repairHelper)
+    }
+
     func testAnAppliedBlockIsInSyncEvenWhenTheHelperCannotWrite() throws {
         let fixture = try fixture()
         defer { fixture.remove() }
@@ -139,7 +155,7 @@ final class WriteStateTests: XCTestCase {
             return XCTFail("expected blocked, got \(state)")
         }
         XCTAssertTrue(cause.contains("no layers"), cause)
-        XCTAssertEqual(remedy, .addFragment)
+        XCTAssertNil(remedy, "the pane's own fragment menu resolves this, so no action is promoted")
     }
 
     func testAProfileThatCannotResolveIsBlockedWithItsProblem() throws {
@@ -170,6 +186,23 @@ final class WriteStateTests: XCTestCase {
         }
         XCTAssertTrue(cause.contains("no store"), cause)
         XCTAssertEqual(remedy, .createStore)
+    }
+
+    func testAStoreWithoutProfilesIsBlockedWithoutAPromotedAction() throws {
+        let store = try TemporaryStore()
+        defer { store.remove() }
+        try StoreLayout(root: store.root).create()
+        let live = try LiveFile("127.0.0.1\tlocalhost\n")
+        defer { live.remove() }
+        let model = EditorModel(storeRoot: store.root, fileURL: live.url, writer: UnregisteredHelper())
+
+        let state = model.read().writeState(helper: .enabled)
+
+        guard case .blocked(let cause, let remedy) = state else {
+            return XCTFail("expected blocked, got \(state)")
+        }
+        XCTAssertTrue(cause.contains("no profiles"), cause)
+        XCTAssertNil(remedy, "the sidebar's own New Profile fills this, so no action is promoted")
     }
 
     // MARK: - Every state carries a glyph, a word and a tone

@@ -177,17 +177,13 @@ settings, and revealing the applied block.
 
 ### Requirement: The window searches rather than scrolls
 
-The window MUST offer a search field over the sidebar, MUST scope it to profiles
-or to fragments, and MUST keep the selected item editable while a search is
+The window MUST offer a search field over the sidebar, MUST match both profiles
+and fragments, and MUST keep the selected item editable while a search is
 active.
 
 #### Scenario: A search narrows both sections
 - **WHEN** text is typed in the search field
 - **THEN** the sidebar's sections list only the profiles and fragments matching it
-
-#### Scenario: A scope narrows the search
-- **WHEN** the scope is set to fragments
-- **THEN** only fragments match
 
 #### Scenario: Clearing the search
 - **WHEN** the search text is cleared

@@ -7,21 +7,19 @@ import SwiftUI
 /// this renders and forwards rather than deciding.
 struct ShellView: View {
     @Bindable var model: ShellModel
-    @Environment(\.colorScheme) private var colorScheme
     @State private var searchPresented = false
 
     var body: some View {
         let editor: EditorPresentation = model.editor
-        let palette = BrandPalette.forAppearance(colorScheme)
 
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(model: model)
         } content: {
             ContentPane(model: model)
-                .navigationSplitViewColumnWidth(min: 320, ideal: 440)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 300, max: 340)
         } detail: {
             DetailPane(model: model)
-                .navigationSplitViewColumnWidth(min: 300, ideal: 380)
+                .navigationSplitViewColumnWidth(min: 320, ideal: 600)
         }
         .navigationTitle("Hazmat")
         .navigationSubtitle(editor.windowSubtitle)
@@ -32,12 +30,9 @@ struct ShellView: View {
             prompt: "Search profiles and fragments"
         )
         .toolbar { toolbar }
-        .environment(\.brand, palette)
-        .tint(palette.accent.color)
         .frame(minWidth: 880, minHeight: 560)
         .task { model.refresh() }
         .onChange(of: model.searchText) { _, _ in model.searchChanged() }
-        .onChange(of: model.searchScope) { _, _ in model.searchChanged() }
         .onChange(of: model.searchFocusRequests) { _, _ in searchPresented = true }
         .sheet(isPresented: $model.showHelperSheet) {
             HelperSheetView(model: model)
@@ -87,20 +82,12 @@ struct ShellView: View {
         )
     }
 
-    /// The toolbar carries the sidebar toggle, the new-item menu and reload:
-    /// actions every phase can perform, each with the shortcut the menu bar
-    /// binds.
+    /// The toolbar carries the new-item menu and reload: actions every phase can
+    /// perform, each with the shortcut the menu bar binds. The sidebar toggle is
+    /// the split view's own, so the toolbar does not draw a second one.
     @ToolbarContentBuilder
     private var toolbar: some ToolbarContent {
         let commands: CommandPresentation = model.commands
-        ToolbarItem(placement: .navigation) {
-            Button {
-                model.perform(.toggleSidebar)
-            } label: {
-                Image(systemName: "sidebar.left")
-            }
-            .help(commands.item("toggle-sidebar")?.title ?? WindowAction.toggleSidebar.title)
-        }
         ToolbarItemGroup(placement: .primaryAction) {
             Menu {
                 Button(commands.item("new-profile")?.title ?? WindowAction.newProfile.title) {

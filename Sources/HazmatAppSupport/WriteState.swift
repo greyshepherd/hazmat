@@ -9,7 +9,6 @@ public enum WindowAction: Equatable, Sendable {
     case chooseLocation
     case newProfile
     case newFragment
-    case addFragment
     case apply
     case revert
     case overwriteDrift
@@ -20,6 +19,9 @@ public enum WindowAction: Equatable, Sendable {
     case delete
     case save
     case installHelper
+    /// Removes the registration and registers the helper again, for a helper
+    /// that is registered but no longer answers.
+    case repairHelper
     case revealHostsFile
     case openSettings
     case toggleSidebar
@@ -30,11 +32,11 @@ public enum WindowAction: Equatable, Sendable {
     /// confirmation, a sheet, or the search field.
     public var presentsInTheWindow: Bool {
         switch self {
-        case .createStore, .chooseLocation, .newProfile, .newFragment, .addFragment,
+        case .createStore, .chooseLocation, .newProfile, .newFragment,
              .apply, .revert, .overwriteDrift, .removeBlock, .rename, .duplicate, .delete,
              .save, .installHelper, .search, .showHelp:
             return true
-        case .reload, .revealHostsFile, .openSettings, .toggleSidebar:
+        case .reload, .repairHelper, .revealHostsFile, .openSettings, .toggleSidebar:
             return false
         }
     }
@@ -46,7 +48,6 @@ public enum WindowAction: Equatable, Sendable {
         case .chooseLocation: return "Choose Location…"
         case .newProfile: return "New Profile"
         case .newFragment: return "New Fragment"
-        case .addFragment: return "Add a Fragment"
         case .apply: return "Apply"
         case .revert: return "Revert"
         case .overwriteDrift: return "Overwrite the Drifted Block…"
@@ -57,6 +58,7 @@ public enum WindowAction: Equatable, Sendable {
         case .delete: return "Delete"
         case .save: return "Save"
         case .installHelper: return "Install Helper…"
+        case .repairHelper: return "Repair the Helper…"
         case .revealHostsFile: return "Reveal Hosts File"
         case .openSettings: return "Settings…"
         case .toggleSidebar: return "Toggle Sidebar"
@@ -140,7 +142,7 @@ extension EditorPresentation {
             return .blocked(cause: storeProblem, remedy: nil)
         }
         guard profiles.isEmpty == false else {
-            return .blocked(cause: "The store holds no profiles.", remedy: .newProfile)
+            return .blocked(cause: "The store holds no profiles.", remedy: nil)
         }
         guard let selectedProfile else {
             return .blocked(cause: "No profile is selected.", remedy: nil)
@@ -148,7 +150,7 @@ extension EditorPresentation {
         guard !layers.isEmpty else {
             return .blocked(
                 cause: "'\(selectedProfile)' stacks no layers, so there is nothing to write yet.",
-                remedy: .addFragment
+                remedy: nil
             )
         }
         guard rendering != nil else {
@@ -163,7 +165,7 @@ extension EditorPresentation {
             return .inSync
         case .absent, .drifted:
             guard helper.canWrite else {
-                return .blocked(cause: helper.writeBlockCause, remedy: .installHelper)
+                return .blocked(cause: helper.writeBlockCause, remedy: helper.remedy)
             }
             return .pending(entries: entryLines.count)
         case .refused(let error):

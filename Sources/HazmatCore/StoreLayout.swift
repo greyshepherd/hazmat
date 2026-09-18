@@ -65,9 +65,13 @@ public struct StoreLayout: Equatable, Sendable {
         root.appendingPathComponent("profiles", isDirectory: true)
     }
 
-    /// Whether the store has been created at all.
+    /// Whether the store has been created at all: either of its two directories
+    /// is there. A store whose first file was a fragment holds no `profiles/`
+    /// yet, and it is still a store the window reads and edits.
     public var exists: Bool {
-        FileManager.default.fileExists(atPath: profilesDirectory.path)
+        let manager = FileManager.default
+        return manager.fileExists(atPath: profilesDirectory.path)
+            || manager.fileExists(atPath: fragmentsDirectory.path)
     }
 
     public func fragmentURL(_ name: FragmentID) -> URL {

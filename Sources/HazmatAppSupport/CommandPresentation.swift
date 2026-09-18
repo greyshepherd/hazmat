@@ -124,7 +124,8 @@ public struct CommandPresentation: Equatable, Sendable {
                 item("remove-block", "Remove the Managed Block…", .removeBlock, enabled: holdsABlock),
                 item("create-store", "Create Store", .createStore, enabled: !editor.storeExists),
                 item("choose-location", "Choose Store Location…", .chooseLocation),
-                item("install-helper", "Install the Helper…", .installHelper, enabled: !helper.canWrite)
+                item("install-helper", "Install the Helper…", .installHelper, enabled: helper.remedy == .installHelper),
+                item("repair-helper", "Repair the Helper…", .repairHelper, enabled: helper.remedy == .repairHelper)
             ]),
             Menu(id: "window", title: "Window", items: [
                 item("toggle-sidebar", "Toggle Sidebar", .toggleSidebar, Shortcut("s", [.command, .control]))

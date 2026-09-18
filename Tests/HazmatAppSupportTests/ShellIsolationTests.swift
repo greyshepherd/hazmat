@@ -52,7 +52,7 @@ final class ShellIsolationTests: XCTestCase {
         "SettingsView.swift",
         "ShellCommands.swift",
         "StatusMark.swift",
-        "BrandColors.swift"
+        "WindowViews.swift"
     ]
 
     private static let storeAndCompositionNames = [
@@ -116,7 +116,8 @@ final class ShellIsolationTests: XCTestCase {
 
         XCTAssertTrue(entryPoint.contains("@main"), entryPoint)
         XCTAssertTrue(entryPoint.contains("struct HazmatApp: App"), entryPoint)
-        XCTAssertTrue(entryPoint.contains("WindowGroup"), entryPoint)
+        XCTAssertTrue(entryPoint.contains("Window(\"Hazmat\", id: Self.windowID)"), entryPoint)
+        XCTAssertFalse(entryPoint.contains("WindowGroup"), entryPoint)
         XCTAssertTrue(entryPoint.contains("MenuBarExtra"), entryPoint)
     }
 
@@ -127,9 +128,11 @@ final class ShellIsolationTests: XCTestCase {
 
         XCTAssertTrue(model.contains("writer: PrivilegedWriter? = nil"), model)
         let daemonClient = "Daemon" + "Client()"
-        XCTAssertTrue(model.contains("let writer = writer ?? \(daemonClient)"), model)
+        XCTAssertTrue(model.contains("let writer = writer ?? client"), model)
+        XCTAssertTrue(model.contains("let client = \(daemonClient)"), model)
         XCTAssertTrue(model.contains("writer: writer"), model)
         XCTAssertFalse(model.contains("\(daemonClient).write"), model)
+        XCTAssertFalse(model.contains("\(daemonClient).removeBlock"), model)
     }
 
     /// One model, shared by the window, the settings scene, the commands and the

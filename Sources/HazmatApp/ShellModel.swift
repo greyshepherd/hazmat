@@ -70,7 +70,6 @@ final class ShellModel {
     /// brings the same item back.
     var selection: SidebarSelection?
     var searchText = ""
-    var searchScope: SearchScope = .all
 
     /// The edited fragment text, so the menu's Save acts on the same draft the
     /// editor shows. The baseline is what the store held when the draft was
@@ -86,9 +85,6 @@ final class ShellModel {
     var nameDraft = ""
     var showHelperSheet = false
     var sidebarVisible = true
-    /// Whether the prominent action of a profile with no layers is choosing the
-    /// fragment to add.
-    var isAddingLayer = false
     /// Bumped when the search command asks for the field.
     private(set) var searchFocusRequests = 0
 
@@ -98,16 +94,33 @@ final class ShellModel {
     private let writer: PrivilegedWriter
     private var session: StoreSession
     private let registration: HelperRegistration
+    private let presence: HelperPresence
+    /// The last answer to a check for the helper, and when it arrived. Nothing
+    /// is checked at launch, so this is empty until the first answer lands.
+    private var lastAnswer: (answer: HelperReachability, at: Date)?
+    private var checkInFlight = false
+    private var repairInFlight = false
+
+    /// How long an answer is trusted while it says the helper is answering. A
+    /// check costs a round trip that can take its whole bound when nothing
+    /// answers, so a helper that answers is checked again at this interval,
+    /// while a helper that did not answer is checked only when something asks.
+    private static let answerFreshness: TimeInterval = 5
 
     init(
         fileURL: URL = DaemonTarget.hostsFile,
         writer: PrivilegedWriter? = nil,
+        presence: HelperPresence? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         preference: StoreLocationPreference = DefaultsStoreLocationPreference()
     ) {
-        let writer = writer ?? DaemonClient()
+        // One client serves both, so the app opens no second path to the helper
+        // when neither is given.
+        let client = DaemonClient()
+        let writer = writer ?? client
         self.fileURL = fileURL
         self.writer = writer
+        self.presence = presence ?? client
         self.preference = preference
         environmentRoot = StoreLocation.environmentRoot(environment)
         let session = StoreSession(
@@ -122,6 +135,10 @@ final class ShellModel {
         helper = registration.state
         selection = editor.selection
         adoptFragmentDraft(editor)
+        // Nothing is claimed before it is asked. The first check runs here, so a
+        // window opened against a helper that cannot be started says so at once
+        // instead of claiming writes are ready for as long as the check takes.
+        checkPresenceNow()
     }
 
     // MARK: - What the scene renders
@@ -146,6 +163,10 @@ final class ShellModel {
     var primaryAction: WindowAction? {
         phase.primaryAction(write: writeState, helper: helper)
     }
+
+    /// What fills the content pane: the selected item, or the phase when the
+    /// store offers nothing to edit.
+    var content: EditorPresentation.Content { editor.content(phase: phase) }
 
     /// Whether a revert is offered: only after an apply this session performed.
     var canRevert: Bool { lastApply != nil }
@@ -181,13 +202,42 @@ final class ShellModel {
         // The menu rebuilds for every observable change, so the writes are
         // guarded: an unchanged value must not notify observers and rebuild the
         // menu that is being read.
-        let helperState = registration.state
+        let helperState = helperState()
         if helperState != helper { helper = helperState }
 
         let latest = session.catalogue.activation(reading: session.liveFile)
         if latest != reading { reading = latest }
 
         refreshEditor()
+        checkPresence()
+    }
+
+    /// What the registration reports, refined by the last answer when there is
+    /// one. A helper the app has not checked yet keeps the registration's own
+    /// word for the moment it takes the check to land.
+    private func helperState() -> HelperState {
+        guard let lastAnswer else { return registration.state }
+        return registration.state.refined(by: lastAnswer.answer)
+    }
+
+    /// Asks once, on the calling thread, and records the answer. Bounded by the
+    /// client's own bound, so this waits no longer than that.
+    @discardableResult
+    private func checkPresenceNow() -> HelperReachability {
+        let answer = presence.check()
+        record(answer)
+        return answer
+    }
+
+    /// Records what a check found, and reports whether it changed the state.
+    /// Nothing is decided here: the state follows from the answer the same way it
+    /// follows from the registration.
+    @discardableResult
+    private func record(_ answer: HelperReachability) -> Bool {
+        let changed = lastAnswer?.answer != answer
+        lastAnswer = (answer, Date())
+        if changed { helper = helperState() }
+        return changed
     }
 
     /// Re-reads the store and the live file for the window. Called when the
@@ -207,7 +257,7 @@ final class ShellModel {
     private func refreshEditor() {
         let latest = session.editor.read(
             selection: selection,
-            search: StoreSearch(text: searchText, scope: searchScope)
+            search: StoreSearch(text: searchText)
         )
         if latest != editor { editor = latest }
         // A selection the store no longer holds moves to what the read chose; a
@@ -218,8 +268,9 @@ final class ShellModel {
     }
 
     /// Keeps the draft the user is editing, and adopts the store's text when
-    /// another fragment is focused or when the file changed under an unedited
-    /// draft. A search that hides the selection leaves the draft alone.
+    /// another fragment is focused, when the file changed under an unedited
+    /// draft, or when the file now holds the draft a save wrote. A search that
+    /// hides the selection leaves the draft alone.
     private func adoptFragmentDraft(_ presentation: EditorPresentation) {
         switch presentation.selection {
         case .fragment(let fragment):
@@ -229,7 +280,8 @@ final class ShellModel {
                 draftBaseline = presentation.fragmentText
                 return
             }
-            guard presentation.fragmentText != draftBaseline, fragmentDraft == draftBaseline else { return }
+            guard presentation.fragmentText != draftBaseline else { return }
+            guard fragmentDraft == draftBaseline || fragmentDraft == presentation.fragmentText else { return }
             fragmentDraft = presentation.fragmentText
             draftBaseline = presentation.fragmentText
         case .profile:
@@ -243,14 +295,34 @@ final class ShellModel {
 
     // MARK: - The helper
 
-    func register() {
-        do {
-            try registration.register()
-            notice = "Registered. Approve the helper in System Settings to enable writes."
-        } catch {
-            notice = "\(error)"
+    /// Asks whether the helper is there, unless a check is already out, the last
+    /// answer is still fresh, or the last answer was that nothing answered and
+    /// nothing has happened since to ask again.
+    ///
+    /// The answer arrives on the main actor, so the window is never held up by a
+    /// helper that is not there.
+    private func checkPresence(forced: Bool = false) {
+        guard registration.state == .enabled else { return }
+        guard !checkInFlight else { return }
+        if !forced, let lastAnswer {
+            guard lastAnswer.answer == .answering else { return }
+            guard Date().timeIntervalSince(lastAnswer.at) >= Self.answerFreshness else { return }
         }
-        refresh()
+        checkInFlight = true
+        let presence = presence
+        Task.detached {
+            let answer = presence.check()
+            await MainActor.run {
+                self.checkInFlight = false
+                if self.record(answer) { self.refresh() }
+            }
+        }
+    }
+
+    /// Installs the helper: the system registers it, asks whether it answers, and
+    /// replaces the job once when nothing does.
+    func register() {
+        makeHelperAnswer(working: "Installing the helper…")
     }
 
     func unregister() {
@@ -259,6 +331,44 @@ final class ShellModel {
             notice = "Unregistered."
         } catch {
             notice = "\(error)"
+        }
+        refresh()
+    }
+
+    /// Repairs the helper: the same sequence, named for what the user sees, so
+    /// the window reports what it did rather than what it hoped for.
+    func repairHelper() {
+        makeHelperAnswer(working: "Repairing the helper…")
+    }
+
+    /// Runs the sequence that makes the helper answer, away from the main thread:
+    /// the system finishes a removal after the call returns and refuses a
+    /// registration that lands inside that window, so it takes some seconds. The
+    /// state stays what the last answer made it for the whole of it, and the
+    /// report is the outcome of the last step rather than a hope.
+    private func makeHelperAnswer(working: String) {
+        guard !repairInFlight else { return }
+        repairInFlight = true
+        notice = working
+        let repair = HelperRepair(registration: registration, presence: presence)
+        Task.detached {
+            let outcome = repair.run()
+            await MainActor.run { self.finishHelperWork(outcome) }
+        }
+    }
+
+    private func finishHelperWork(_ outcome: HelperRepair.Outcome) {
+        repairInFlight = false
+        if let failure = outcome.failure {
+            notice = "The system did not register the helper: \(failure) "
+                + "Allow it in System Settings > General > Login Items & Extensions, or remove it and install it again."
+        } else if let answer = outcome.answer {
+            record(answer)
+            notice = answer == .answering
+                ? "The helper answers, so writes are ready."
+                : "The helper was registered and still does not answer."
+        } else {
+            notice = "Registered. Approve the helper in System Settings to enable writes."
         }
         refresh()
     }
@@ -356,10 +466,12 @@ final class ShellModel {
     private var selectedFragment: FragmentID? { editor.selectedFragment }
 
     /// Saves the edited text, then re-applies the profile whose block is live
-    /// when the block is still the one that profile rendered before the edit.
+    /// when the block is still the one that profile rendered before the edit. A
+    /// store that holds no profile still saves the text: there is nothing to
+    /// re-apply.
     func saveFragment(text: String) {
-        guard let fragment = selectedFragment, let profile = selectedProfile else { return }
-        finish(session.editor.save(fragment: fragment, text: text, editing: profile, previous: editor))
+        guard let fragment = selectedFragment else { return }
+        finish(session.editor.save(fragment: fragment, text: text, editing: selectedProfile, previous: editor))
     }
 
     func saveFragmentDraft() {
@@ -475,7 +587,6 @@ final class ShellModel {
     func confirm() {
         guard let request = confirmation else { return }
         confirmation = nil
-        isAddingLayer = false
         switch request {
         case .apply(let profile, _, _):
             apply(profile, replacing: replacementForApply())
@@ -592,7 +703,6 @@ final class ShellModel {
         case .chooseLocation: chooseStoreLocation()
         case .newProfile: beginNameEntry(.newProfile)
         case .newFragment: beginNameEntry(.newFragment)
-        case .addFragment: isAddingLayer = true
         case .apply: requestApply()
         case .revert: requestRevert()
         case .overwriteDrift: requestOverwriteDrift()
@@ -603,6 +713,7 @@ final class ShellModel {
         case .delete: deleteSelected()
         case .save: saveFragmentDraft()
         case .installHelper: showHelperSheet = true
+        case .repairHelper: repairHelper()
         case .revealHostsFile: revealHostsFile()
         case .openSettings: break  // the Settings scene's own command opens it
         case .toggleSidebar: sidebarVisible.toggle()
@@ -614,7 +725,19 @@ final class ShellModel {
     private func finish(_ outcome: ApplyOutcome) {
         busy = false
         notice = outcome.description
+        followUp(on: outcome)
         refresh()
+    }
+
+    /// A write is the strongest check there is: the helper answers by writing.
+    /// A write that did not go through is evidence it is not there, so the state
+    /// follows what was just learned instead of waiting for the next interval.
+    private func followUp(on outcome: ApplyOutcome) {
+        switch outcome {
+        case .applied: record(.answering)
+        case .refused, .failed: checkPresence(forced: true)
+        case .nothingToDo: break
+        }
     }
 
     private func finish(_ outcome: EditorOutcome) {

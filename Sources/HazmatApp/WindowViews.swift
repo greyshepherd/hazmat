@@ -1,28 +1,16 @@
 import HazmatAppSupport
 import SwiftUI
 
-extension BrandColor {
+extension StatusTone {
+    /// The colour the system pairs with a state. A state is still carried by a
+    /// glyph and a word as well, never by colour alone.
     var color: Color {
-        Color(.sRGB, red: red, green: green, blue: blue, opacity: 1)
-    }
-}
-
-extension BrandPalette {
-    static func forAppearance(_ scheme: ColorScheme) -> BrandPalette {
-        scheme == .dark ? .dark : .light
-    }
-}
-
-private struct BrandPaletteKey: EnvironmentKey {
-    static let defaultValue = BrandPalette.light
-}
-
-extension EnvironmentValues {
-    /// The palette for the appearance the window is rendering in. Set once at
-    /// the root, so no control falls back to the system accent.
-    var brand: BrandPalette {
-        get { self[BrandPaletteKey.self] }
-        set { self[BrandPaletteKey.self] = newValue }
+        switch self {
+        case .neutral: return .secondary
+        case .success: return .green
+        case .warning: return .orange
+        case .danger: return .red
+        }
     }
 }
 
@@ -32,26 +20,24 @@ struct StatusLabel: View {
     let symbolName: String
     let word: String
     let tone: StatusTone
-    let palette: BrandPalette
     var font: Font = .callout
 
     var body: some View {
         Label {
             Text(word)
                 .font(font)
-                .foregroundStyle(palette.text(tone).color)
+                .foregroundStyle(tone.color)
         } icon: {
             Image(systemName: symbolName)
-                .foregroundStyle(palette.mark(tone).color)
+                .foregroundStyle(tone.color)
         }
     }
 }
 
-/// The one prominently styled action of a phase: the accent's darker fill step,
-/// with the label colour the contrast test measures against it.
+/// The one prominently styled action of a phase, filled with the accent the
+/// system resolves for the user's choice.
 struct PrimaryActionButton: View {
     let action: WindowAction
-    let palette: BrandPalette
     let perform: (WindowAction) -> Void
 
     var body: some View {
@@ -59,10 +45,8 @@ struct PrimaryActionButton: View {
             perform(action)
         } label: {
             Text(action.title)
-                .foregroundStyle(palette.accentOn.color)
         }
         .buttonStyle(.borderedProminent)
-        .tint(palette.accentFill.color)
         .controlSize(.large)
         .accessibilityLabel(Text(action.title))
         .help(action.title)
@@ -75,18 +59,16 @@ struct EmptyStateView: View {
     let detail: String
     let actionTitle: String
     let actionSymbol: String
-    let palette: BrandPalette
     let perform: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title)
                 .font(.headline)
-                .foregroundStyle(palette.textPrimary.color)
+                .foregroundStyle(.primary)
             Text(detail)
                 .font(.callout)
-                .foregroundStyle(palette.textSecondary.color)
-                .fixedSize(horizontal: false, vertical: true)
+                .foregroundStyle(.secondary)
             Button {
                 perform()
             } label: {
@@ -96,6 +78,6 @@ struct EmptyStateView: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(12)
-        .background(palette.well.color, in: RoundedRectangle(cornerRadius: 8))
+        .background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
     }
 }

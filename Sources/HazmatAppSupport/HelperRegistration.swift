@@ -92,3 +92,28 @@ public struct HelperRegistration: Sendable {
         SMAppService.daemon(plistName: plistName)
     }
 }
+
+/// The system's side of registration as the app uses it, so a repair can be
+/// exercised without the system: removing a registration starts asynchronously,
+/// and only the system decides whether the next one is allowed yet.
+public protocol HelperRegistering: Sendable {
+    var state: HelperState { get }
+    func register() throws
+    func unregister() throws
+}
+
+extension HelperRegistration: HelperRegistering {}
+
+extension RegistrationFailure {
+    /// Whether asking again can succeed. Removing a registration finishes after
+    /// the call returns, and a registration that lands inside that window is
+    /// refused even though the same call works a moment later.
+    public var isRetryable: Bool {
+        switch self {
+        case .alreadyRegistered, .notPermitted:
+            return true
+        case .deniedByUser, .invalidSignature, .jobNotFound, .other:
+            return false
+        }
+    }
+}
