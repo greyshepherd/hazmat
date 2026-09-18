@@ -191,15 +191,26 @@ $DIRTY"
 # MARK: - The release
 
 step "publishing $TAG to $RELEASE_REPO"
+local_digest="$(shasum -a 256 "$ARTIFACT" | awk '{print $1}')"
 if gh release view "$TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
-    fail "release $TAG already exists; a tag is never reused"
-fi
-
+    # The tag is there. A published archive is never replaced, so the only way this
+    # is not a refusal is that the release already carries these exact bytes — which
+    # is what a run that stopped after uploading and before the feed leaves behind.
+    # Refusing there would make the feed impossible to write without cutting a
+    # version nobody asked for.
+    published_digest="$(curl --silent --location "$ARCHIVE_URL" | shasum -a 256 | awk '{print $1}')"
+    [ -n "$published_digest" ] \
+        || fail "release $TAG exists but its archive does not answer at $ARCHIVE_URL"
+    [ "$published_digest" = "$local_digest" ] \
+        || fail "release $TAG already carries a different archive; a published archive is never replaced, so publish a higher build number"
+    echo "   $TAG already carries this archive, so only the feed is left to write"
+else
     gh release create "$TAG" "$ARTIFACT" \
         --repo "$RELEASE_REPO" \
         --title "Hazmat $SHORT_VERSION" \
         "${NOTES_ARGUMENT[@]}" \
         || fail "the release could not be created"
+fi
 
 # MARK: - The archive is readable before the feed names it
 
@@ -217,12 +228,27 @@ ENTRY="$("$ROOT/Scripts/appcast-entry.sh" \
     --notes "$NOTES_URL" \
     --config "$CONFIG")"
 
-awk -v item="$ENTRY" '
-    !placed && /<item>/ { print item; placed = 1 }
-    !placed && /<\/channel>/ { print item; placed = 1 }
-    { print }
-' "$FEED_FILE" > "$FEED_FILE.published"
-mv "$FEED_FILE.published" "$FEED_FILE"
+# The new entry goes above the ones already there, so the feed reads newest first.
+# The insertion is built whole and moved into place: a half-written feed is worse
+# than a stale one, and the whole file is what a client fetches.
+insert_entry() {
+    local target
+    target="$(grep -n '<item' "$FEED_FILE" | sed -n '1p' | cut -d: -f1)"
+    if [ -z "$target" ]; then
+        target="$(grep -n '</channel>' "$FEED_FILE" | sed -n '1p' | cut -d: -f1)"
+    fi
+    [ -n "$target" ] || fail "the feed has no channel to put an item in"
+
+    head -n "$((target - 1))" "$FEED_FILE"
+    printf '%s\n' "$ENTRY"
+    tail -n "+$target" "$FEED_FILE"
+}
+
+PUBLISHED_FEED="$(mktemp)"
+trap 'rm -f "$PUBLISHED_FEED"' EXIT
+insert_entry > "$PUBLISHED_FEED"
+mv "$PUBLISHED_FEED" "$FEED_FILE"
+trap - EXIT
 
 git -C "$ROOT" add "$FEED_RELATIVE"
 git -C "$ROOT" commit --quiet -m "Publish Hazmat $SHORT_VERSION" \
