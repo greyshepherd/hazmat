@@ -18,9 +18,11 @@
 # The notarization credential comes from the environment and is never prompted
 # for. Set one of:
 #
-#   HAZMAT_NOTARY_PROFILE                                   a notarytool keychain profile
-#   HAZMAT_NOTARY_KEY, HAZMAT_NOTARY_KEY_ID, HAZMAT_NOTARY_ISSUER   an App Store Connect key
-#   HAZMAT_APPLE_ID, HAZMAT_APPLE_TEAM_ID, HAZMAT_APPLE_PASSWORD    an Apple ID and an app password
+#   HAZMAT_NOTARY_PROFILE                       a notarytool keychain profile
+#   HAZMAT_NOTARY_KEY, HAZMAT_NOTARY_KEY_ID    an App Store Connect API key, plus
+#     (and HAZMAT_NOTARY_ISSUER for a team key)   the issuer a team key carries
+#   HAZMAT_APPLE_ID, HAZMAT_APPLE_TEAM_ID, HAZMAT_APPLE_PASSWORD
+#                                               an Apple ID and an app password
 #
 # The signing identity and the team the configuration names must agree; the
 # daemon derives the team it requires from its own signature, so a bundle signed
@@ -101,10 +103,12 @@ notary_credential() {
         return
     fi
     if [ -n "${HAZMAT_NOTARY_KEY:-}" ] || [ -n "${HAZMAT_NOTARY_KEY_ID:-}" ] || [ -n "${HAZMAT_NOTARY_ISSUER:-}" ]; then
-        [ -n "${HAZMAT_NOTARY_KEY:-}" ] || fail "HAZMAT_NOTARY_KEY_ID is set without HAZMAT_NOTARY_KEY"
+        [ -n "${HAZMAT_NOTARY_KEY:-}" ] || fail "an App Store Connect credential needs HAZMAT_NOTARY_KEY, the path to the API key"
         [ -n "${HAZMAT_NOTARY_KEY_ID:-}" ] || fail "HAZMAT_NOTARY_KEY is set without HAZMAT_NOTARY_KEY_ID"
-        [ -n "${HAZMAT_NOTARY_ISSUER:-}" ] || fail "HAZMAT_NOTARY_KEY is set without HAZMAT_NOTARY_ISSUER"
-        NOTARY_ARGS=(--key "$HAZMAT_NOTARY_KEY" --key-id "$HAZMAT_NOTARY_KEY_ID" --issuer "$HAZMAT_NOTARY_ISSUER")
+        NOTARY_ARGS=(--key "$HAZMAT_NOTARY_KEY" --key-id "$HAZMAT_NOTARY_KEY_ID")
+        # A team key needs its issuer and an individual key must not carry one, so
+        # the issuer is passed only when it is set.
+        [ -n "${HAZMAT_NOTARY_ISSUER:-}" ] && NOTARY_ARGS+=(--issuer "$HAZMAT_NOTARY_ISSUER")
         return
     fi
     if [ -n "${HAZMAT_APPLE_ID:-}" ] || [ -n "${HAZMAT_APPLE_TEAM_ID:-}" ] || [ -n "${HAZMAT_APPLE_PASSWORD:-}" ]; then
@@ -114,7 +118,7 @@ notary_credential() {
         NOTARY_ARGS=(--apple-id "$HAZMAT_APPLE_ID" --team-id "$HAZMAT_APPLE_TEAM_ID" --password "$HAZMAT_APPLE_PASSWORD")
         return
     fi
-    fail "no notarization credential: set HAZMAT_NOTARY_PROFILE to a 'notarytool store-credentials' profile, or HAZMAT_NOTARY_KEY, HAZMAT_NOTARY_KEY_ID and HAZMAT_NOTARY_ISSUER, or HAZMAT_APPLE_ID, HAZMAT_APPLE_TEAM_ID and HAZMAT_APPLE_PASSWORD"
+    fail "no notarization credential: set HAZMAT_NOTARY_PROFILE to a 'notarytool store-credentials' profile, or HAZMAT_NOTARY_KEY and HAZMAT_NOTARY_KEY_ID (and HAZMAT_NOTARY_ISSUER for a team key), or HAZMAT_APPLE_ID, HAZMAT_APPLE_TEAM_ID and HAZMAT_APPLE_PASSWORD"
 }
 
 # MARK: - Notarize and staple

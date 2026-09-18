@@ -54,13 +54,24 @@ failure and reports it; a wrong version, a missing identity, and a rejected
 notarization all stop the run before anything is published.
 
 The notarization credential comes from the environment and is never prompted for.
-Set one of:
+`notarytool` accepts two kinds, and either works here:
 
 | Credential | Environment |
 | --- | --- |
 | A `notarytool` keychain profile | `HAZMAT_NOTARY_PROFILE` |
-| An App Store Connect key | `HAZMAT_NOTARY_KEY`, `HAZMAT_NOTARY_KEY_ID`, `HAZMAT_NOTARY_ISSUER` |
+| An App Store Connect API key | `HAZMAT_NOTARY_KEY` (the `.p8` path), `HAZMAT_NOTARY_KEY_ID`, and `HAZMAT_NOTARY_ISSUER` for a team key |
 | An Apple ID and an app-specific password | `HAZMAT_APPLE_ID`, `HAZMAT_APPLE_TEAM_ID`, `HAZMAT_APPLE_PASSWORD` |
+
+A keychain profile is either kind, stored once:
+
+```
+xcrun notarytool store-credentials hazmat --key ~/private_keys/AuthKey_ABC123.p8 --key-id ABC123
+xcrun notarytool store-credentials hazmat --apple-id you@example.com --team-id BHY3LCR536
+```
+
+The API key is the better of the two: it is scoped to notarization, revocable on its
+own, and needs no app-specific password. An individual key carries no issuer; a
+team key must carry one.
 
 The signing identity is found in the keychain, or named with
 `HAZMAT_SIGN_IDENTITY`. A run with no credential names the one that is missing and
@@ -106,8 +117,9 @@ Once, before the first release:
    the keychain is not the only copy.
 
 3. **Store the notarization credential.** `xcrun notarytool store-credentials`
-   writes a keychain profile; name it in `HAZMAT_NOTARY_PROFILE`. Nothing prompts,
-   so a missing credential is a stopped release rather than a stalled one.
+   writes a keychain profile from either an App Store Connect API key or an Apple
+   ID and an app-specific password; name it in `HAZMAT_NOTARY_PROFILE`. Nothing
+   prompts, so a missing credential is a stopped release rather than a stalled one.
 
 4. **Enable Pages** for the repository, from the branch and the directory the
    configuration names: `update.feedBranch` and the directory of
