@@ -14,7 +14,9 @@ first failure and reports it. `publish.sh` refuses a build number that is not
 greater than the greatest the published feed carries, tags the commit the
 release was cut from, uploads the image as a release asset, and only then
 writes and pushes the feed entry that installed copies check — an entry is
-never readable before the archive it names.
+never readable before the archive it names. The release it creates carries the
+changelog's section for that version as its notes, so the release page and
+`CHANGELOG.md` are one text.
 
 The configuration — versions, signing team, update feed address and public
 key, and the repository and branch the feed is published to — lives in

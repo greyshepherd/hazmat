@@ -63,7 +63,15 @@ final class ReleaseToolingTests: XCTestCase {
     /// working tree's publish script committed on top. The clone is the root the
     /// script resolves, so pushing a tag lands in the throwaway origin rather than
     /// in the repository this suite is running against.
-    private func rehearsal(cutting version: String, build: Int) throws -> (clone: URL, origin: URL) {
+    ///
+    /// The changelog's section for the version being cut carries
+    /// `changelogSection`, so a release page that would carry notes is exercised
+    /// beside one that has no section to carry.
+    private func rehearsal(
+        cutting version: String,
+        build: Int,
+        changelogSection: String? = "A rehearsal."
+    ) throws -> (clone: URL, origin: URL) {
         let scratch = try workingDirectory("rehearsal")
         let origin = scratch.appendingPathComponent("origin.git")
         try git(["clone", "--quiet", "--local", "--bare", repositoryRoot().path, origin.path], in: nil)
@@ -83,6 +91,14 @@ final class ReleaseToolingTests: XCTestCase {
         rewritten["buildNumber"] = build
         try JSONSerialization.data(withJSONObject: rewritten, options: [.prettyPrinted])
             .write(to: clone.appendingPathComponent("release/config.json"))
+
+        if let changelogSection {
+            // Appended, so the section for this version is the last one in the file
+            // and runs to the end of it.
+            let file = clone.appendingPathComponent("CHANGELOG.md")
+            let existing = try String(contentsOf: file, encoding: .utf8)
+            try write("\(existing)\n## \(version) — 2026-09-18\n\n\(changelogSection)\n", to: file)
+        }
 
         try git(["add", "-A"], in: clone)
         try git(["commit", "--quiet", "-m", "rehearsal: cut \(version)"], in: clone)
@@ -364,6 +380,63 @@ final class ReleaseToolingTests: XCTestCase {
         XCTAssertNotEqual(refused.status, 0)
         XCTAssertTrue(refused.output.contains("HAZMAT_GITHUB_TOKEN"), refused.output)
         XCTAssertTrue(refused.output.contains("no GitHub token"), refused.output)
+    }
+
+    // MARK: - The release page carries the changelog
+
+    func testAPublishWithoutAChangelogSectionIsRefusedBeforeAnythingIsTagged() throws {
+        let (clone, origin) = try rehearsal(cutting: "9.9.9", build: 9, changelogSection: nil)
+
+        let refused = try run(
+            clone.appendingPathComponent("Scripts/publish.sh"),
+            ["--artifact", try artifact().path, "--published", try publishedFixture().path],
+            environment: ["HAZMAT_GITHUB_TOKEN": "not-a-real-token"]
+        )
+
+        XCTAssertNotEqual(refused.status, 0)
+        XCTAssertTrue(refused.output.contains("CHANGELOG.md"), refused.output)
+        XCTAssertTrue(refused.output.contains("9.9.9"), refused.output)
+        XCTAssertEqual(
+            try git(["tag", "--list", "v9.9.9"], in: origin).output
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            "",
+            "a release with no notes must not be tagged"
+        )
+    }
+
+    func testAPublishWithAnEmptyChangelogSectionIsRefused() throws {
+        let (clone, origin) = try rehearsal(cutting: "9.9.9", build: 9, changelogSection: "")
+
+        let refused = try run(
+            clone.appendingPathComponent("Scripts/publish.sh"),
+            ["--artifact", try artifact().path, "--published", try publishedFixture().path],
+            environment: ["HAZMAT_GITHUB_TOKEN": "not-a-real-token"]
+        )
+
+        XCTAssertNotEqual(refused.status, 0)
+        XCTAssertTrue(refused.output.contains("is empty"), refused.output)
+        XCTAssertEqual(
+            try git(["tag", "--list", "v9.9.9"], in: origin).output
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            "",
+            "a release with no notes must not be tagged"
+        )
+    }
+
+    func testARehearsalNamesTheChangelogSectionForTheVersionItWouldPublish() throws {
+        let rehearsed = try run("publish.sh", [
+            "--artifact", try artifact().path,
+            "--published", try publishedFeed(carrying: []).path,
+            "--dry-run"
+        ])
+
+        XCTAssertEqual(rehearsed.status, 0, rehearsed.output)
+        let config = try releaseConfiguration()
+        let version = try XCTUnwrap(config["shortVersion"] as? String, "the configuration names no short version")
+        XCTAssertTrue(
+            rehearsed.output.contains("CHANGELOG.md (the \(version) section)"),
+            "the release body must be the changelog's section for \(version): \(rehearsed.output)"
+        )
     }
 
     // MARK: - The tag names the commit the release was cut from

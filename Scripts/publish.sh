@@ -14,10 +14,15 @@
 #   --config <path>     the release configuration
 #   --token-env <name>  the environment variable holding the GitHub token
 #                       (default: HAZMAT_GITHUB_TOKEN, then GITHUB_TOKEN)
-#   --notes <path>      the release notes (default: release/notes/<version>.md)
+#   --notes <path>      the release notes, for a release whose notes are not the
+#                       changelog's (default: the version's changelog section)
 #   --published <path>  read the already-published feed from a file rather than
 #                       from the repository, for a rehearsal
 #   --dry-run           report what would be published, then stop
+#
+# The release page carries the changelog: the release body is the section
+# CHANGELOG.md holds for the version being published, and a version it does not
+# carry stops the run.
 #
 # The token is read from the environment and never prompted for. A run without one
 # stops before it uploads anything.
@@ -47,7 +52,7 @@ step() {
 }
 
 usage() {
-    sed -n '3,25p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    sed -n '3,32p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do
@@ -125,15 +130,52 @@ fi
 [ -f "$ARTIFACT" ] || fail "no artifact at $ARTIFACT; build one with Scripts/release.sh"
 [ -f "$FEED_FILE" ] || fail "no feed at $FEED_FILE"
 
-if [ -z "$NOTES" ]; then
-    NOTES="$ROOT/release/notes/$SHORT_VERSION.md"
-fi
-# Always one element: an empty array is unbound under `set -u` in the bash this
-# ships with, so a release with no notes file names how its notes are made rather
-# than passing nothing.
-NOTES_ARGUMENT=(--generate-notes)
-if [ -f "$NOTES" ]; then
+# MARK: - The notes the release page carries
+
+# The release page carries the changelog: the release body is the section
+# CHANGELOG.md holds for the version being published, so the page and the file
+# cannot say different things. A version the changelog does not carry stops the run
+# rather than publishing a page with nothing on it, and `--notes` answers for a
+# release whose notes are not the changelog's.
+CHANGELOG="$ROOT/CHANGELOG.md"
+NOTES_FILE=""
+PUBLISHED_FEED=""
+remove_temporary_files() {
+    rm -f "${NOTES_FILE:-}" "${PUBLISHED_FEED:-}"
+}
+trap remove_temporary_files EXIT
+
+# A section runs from its heading to the next one, and the heading's first word
+# must equal the version, so a heading naming a pre-release of it is not the
+# section.
+notes_section() {
+    local version="$1" file="$2"
+    awk -v version="$version" '
+        /^## / {
+            if (in_section) { exit }
+            heading = $0
+            sub(/^##[ \t]+/, "", heading)
+            split(heading, word, /[ \t]+/)
+            if (word[1] == version) { in_section = 1; found = 1 }
+            next
+        }
+        in_section { print }
+        END { if (!found) exit 1 }
+    ' "$file"
+}
+
+if [ -n "$NOTES" ]; then
+    [ -f "$NOTES" ] || fail "no notes at $NOTES"
     NOTES_ARGUMENT=(--notes-file "$NOTES")
+    NOTES_ORIGIN="$NOTES"
+else
+    NOTES_FILE="$(mktemp)"
+    notes_section "$SHORT_VERSION" "$CHANGELOG" > "$NOTES_FILE" \
+        || fail "$CHANGELOG carries no $SHORT_VERSION section, so the release page would carry no notes; add one (## $SHORT_VERSION) or pass --notes"
+    grep -q '[^[:space:]]' "$NOTES_FILE" \
+        || fail "the $SHORT_VERSION section of $CHANGELOG is empty, so the release page would carry no notes"
+    NOTES_ARGUMENT=(--notes-file "$NOTES_FILE")
+    NOTES_ORIGIN="$CHANGELOG (the $SHORT_VERSION section)"
 fi
 
 # MARK: - What the feed already says
@@ -167,7 +209,7 @@ archive:    $ARCHIVE_URL
 feed:       $FEED_URL
 feed file:  $FEED_FILE on $FEED_BRANCH
 published:  ${PUBLISHED_MAX:-nothing}
-notes:      $([ -f "$NOTES" ] && printf '%s' "$NOTES" || printf 'generated from the commits')
+notes:      $NOTES_ORIGIN
 token:      ${TOKEN_ENV:-none set}
 REPORT
     exit 0
@@ -276,11 +318,11 @@ insert_entry() {
     tail -n "+$target" "$FEED_FILE"
 }
 
+# The one EXIT trap removes whichever temporary files exist; `mv` has already
+# taken this one's name away, so removing it afterwards names nothing.
 PUBLISHED_FEED="$(mktemp)"
-trap 'rm -f "$PUBLISHED_FEED"' EXIT
 insert_entry > "$PUBLISHED_FEED"
 mv "$PUBLISHED_FEED" "$FEED_FILE"
-trap - EXIT
 
 git -C "$ROOT" add "$FEED_RELATIVE"
 git -C "$ROOT" commit --quiet -m "Publish Hazmat $SHORT_VERSION" \

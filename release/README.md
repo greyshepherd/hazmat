@@ -111,6 +111,13 @@ release against that tag, uploads the image, checks that the image answers at it
 address, and only then writes the feed entry naming it and pushes the feed. An
 entry is never readable before the archive it names.
 
+The release page carries the changelog: the release body is the section
+`CHANGELOG.md` holds for the version being published, so the page and the file
+cannot say different things. A version the changelog does not carry stops the run
+before anything is tagged, and a release whose notes are not the changelog's names
+its own file with `--notes <path>`. Set `shortVersion`, `buildNumber` and that
+section before the run.
+
 The token comes from the environment: `HAZMAT_GITHUB_TOKEN`, or `GITHUB_TOKEN`. It
 needs to be able to create releases in the repository the configuration names and
 to push to the branch the feed is served from, which a token with `repo` scope
