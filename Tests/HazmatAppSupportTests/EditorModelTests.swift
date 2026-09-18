@@ -368,7 +368,30 @@ final class EditorModelTests: XCTestCase {
         XCTAssertEqual(try live.state(), liveBefore)
     }
 
-    // MARK: - 3.5 The model needs no helper
+    // MARK: - 3.5 A rename carries its references
+
+    func testRenamingAFragmentLeavesTheProfilesThatStackItResolving() throws {
+        let fixture = try stackedFixture()
+        defer { fixture.remove() }
+        let model = fixture.model(writer: UnregisteredHelper())
+
+        let before = model.read(selection: .fragment(base))
+        XCTAssertEqual(before.usingProfiles, [other, work])
+
+        XCTAssertEqual(model.rename(fragment: base, to: "renamed").store, .success(.wrote))
+
+        let renamed = model.read(selection: .fragment(FragmentID("renamed")))
+        XCTAssertEqual(renamed.usingProfiles, [other, work])
+        XCTAssertEqual(renamed.entryCount(of: FragmentID("renamed")), 1)
+
+        let profile = model.read(selection: .profile(work))
+        XCTAssertEqual(profile.layers.map(\.rawValue), ["renamed", "project"])
+        XCTAssertEqual(profile.problems, [], "no layer is left naming a fragment that is gone")
+        XCTAssertEqual(profile.entryCount, 2)
+        XCTAssertEqual(try fixture.store.text("profiles/work.profile"), "renamed\nproject\n")
+    }
+
+    // MARK: - 3.6 The model needs no helper
 
     func testEveryStoreOperationSucceedsWithNoHelperAndLeavesTheLiveFileAlone() throws {
         let fixture = try stackedFixture()

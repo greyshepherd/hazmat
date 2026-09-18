@@ -25,6 +25,30 @@ public enum ProfileText {
     public static func render(_ layers: [FragmentID]) -> String {
         layers.map { "\($0.rawValue)\n" }.joined()
     }
+
+    /// The text with every reference to `fragment` written as `newName`, so a
+    /// rename carries its references. Whitespace, comments, blank lines and
+    /// every other byte are as they were found, and a line that does not name
+    /// that fragment — a comment among them — is the line it was.
+    public static func renaming(_ fragment: FragmentID, to newName: FragmentID, in text: String) -> String {
+        text.split(separator: "\n", omittingEmptySubsequences: false)
+            .map { renaming(fragment, to: newName, inLine: $0) }
+            .joined(separator: "\n")
+    }
+
+    private static func renaming(_ fragment: FragmentID, to newName: FragmentID, inLine line: Substring) -> Substring {
+        let trimmed = Lines.trimmed(line)
+        guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { return line }
+
+        let content = Lines.trimmed(trimmed.prefix(while: { $0 != "#" }))
+        guard FragmentID(String(content)) == fragment else { return line }
+
+        // `content` is a slice of `line`, so its own indices replace the name
+        // where it stands and leave what surrounds it alone.
+        var rewritten = line
+        rewritten.replaceSubrange(content.startIndex..<content.endIndex, with: newName.rawValue)
+        return rewritten
+    }
 }
 
 /// Reads a profile: one fragment reference per line, comments and blank lines

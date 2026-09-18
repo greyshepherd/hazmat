@@ -110,6 +110,26 @@ MUST be reported as nothing to do rather than as a failure.
 - **WHEN** a profile that does not exist is deleted
 - **THEN** the outcome reports that nothing was deleted
 
+### Requirement: Renaming a fragment carries the profiles that reference it
+
+Renaming a fragment MUST rewrite every profile reference to the old name, so no
+profile is left naming a fragment the store no longer holds. The rewrite MUST
+change nothing else in those files: whitespace, comments, blank lines, and lines
+that are not a reference to that fragment stay as they were. A profile that does
+not reference the fragment MUST NOT be written at all.
+
+#### Scenario: A referenced fragment is renamed
+- **WHEN** a fragment two profiles reference is renamed
+- **THEN** both profiles name the new fragment and compose to what they composed before
+
+#### Scenario: The line keeps what surrounds the reference
+- **WHEN** a profile line naming the renamed fragment carries leading whitespace or a trailing comment
+- **THEN** the line names the new fragment and keeps the whitespace and the comment
+
+#### Scenario: A profile that does not reference the fragment
+- **WHEN** a fragment is renamed and a profile never named it
+- **THEN** that profile's file is not written
+
 ### Requirement: Deleting a referenced fragment or the applied profile is permitted and reported
 
 Deleting a fragment that a profile references MUST be permitted, and composing

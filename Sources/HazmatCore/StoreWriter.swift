@@ -69,10 +69,15 @@ public struct StoreWriter: Sendable {
         try duplicate(from: .fragment(name), to: .fragment(copy))
     }
 
-    /// Moves the fragment `name` to `newName`, keeping its bytes.
+    /// Moves the fragment `name` to `newName`, keeping its bytes, and carries
+    /// every profile reference to it, so no profile is left naming a fragment
+    /// the store no longer holds.
     @discardableResult
     public func rename(fragment name: FragmentID, to newName: FragmentID) throws -> StoreWrite {
-        try move(.fragment(name), to: .fragment(newName))
+        let moved = try move(.fragment(name), to: .fragment(newName))
+        guard moved == .wrote else { return moved }
+        try carryReferences(from: name, to: newName)
+        return moved
     }
 
     /// Removes the fragment `name`, reporting nothing to do when it is absent.
@@ -185,6 +190,25 @@ public struct StoreWriter: Sendable {
             throw StoreWriteError.failed("renaming \(from.path): \(error)")
         }
         return .wrote
+    }
+
+    /// Writes every profile line that named `old` as `new`, so a rename leaves
+    /// no profile naming a fragment that is gone. A profile is replaced only
+    /// when its text changed, and one that cannot be read is reported rather
+    /// than passed over.
+    private func carryReferences(from old: FragmentID, to new: FragmentID) throws {
+        for profile in layout.profiles() {
+            let url = layout.profileURL(profile)
+            let text: String
+            do {
+                text = try String(contentsOf: url, encoding: .utf8)
+            } catch {
+                throw StoreWriteError.failed("reading \(url.path): \(error)")
+            }
+            let carried = ProfileText.renaming(old, to: new, in: text)
+            guard carried != text else { continue }
+            try write(Data(carried.utf8), to: url)
+        }
     }
 
     private func delete(_ entry: Entry) throws -> StoreWrite {

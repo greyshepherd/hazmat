@@ -24,6 +24,10 @@ private final class TemporaryRoot {
         try contents.write(to: url, atomically: true, encoding: .utf8)
     }
 
+    func text(_ relativePath: String) throws -> String {
+        try String(contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
+    }
+
     /// Every file under the root, relative to it, so a stray temporary file is
     /// visible. Directories are left out.
     func entries() -> [String] {
@@ -327,6 +331,7 @@ final class StoreAuthoringTests: XCTestCase {
         defer { store.remove() }
         try store.writer.save("127.0.0.1\tlocalhost\n", asFragment: FragmentID("base"))
         try store.writer.save("0.0.0.0\tads.example.com\n", asFragment: FragmentID("ads"))
+        try store.write("base\n", to: "profiles/work.profile")
 
         XCTAssertThrowsError(try store.writer.rename(fragment: FragmentID("base"), to: FragmentID("ads"))) { error in
             XCTAssertEqual(error as? StoreWriteError, .nameTaken("ads"))
@@ -340,6 +345,73 @@ final class StoreAuthoringTests: XCTestCase {
             try String(contentsOf: store.layout.fragmentURL(FragmentID("ads")), encoding: .utf8),
             "0.0.0.0\tads.example.com\n"
         )
+        XCTAssertEqual(try store.text("profiles/work.profile"), "base\n", "a refused rename carries nothing")
+    }
+
+    func testRenamingAReferencedFragmentCarriesTheReferenceInEveryProfile() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("127.0.0.1\tlocalhost\n", to: "fragments/base.hosts")
+        try store.write("10.0.0.9\talpha.example\n", to: "fragments/project.hosts")
+        try store.write("base\nproject\n", to: "profiles/work.profile")
+        try store.write("base\n", to: "profiles/other.profile")
+
+        XCTAssertEqual(try store.writer.rename(fragment: FragmentID("base"), to: FragmentID("renamed")), .wrote)
+
+        XCTAssertEqual(try store.text("profiles/work.profile"), "renamed\nproject\n")
+        XCTAssertEqual(try store.text("profiles/other.profile"), "renamed\n")
+        XCTAssertEqual(store.layout.profiles(), [ProfileID("other"), ProfileID("work")])
+
+        // The profiles resolve as they did before: the same layers, in the same
+        // order, under the name the fragment now has.
+        let composition = try HostsComposer(store: DirectoryStore(root: store.root)).compose(profile: ProfileID("work"))
+        XCTAssertEqual(composition.resolved.map(\.name), ["localhost", "alpha.example"])
+        XCTAssertEqual(Set(composition.resolved.map(\.source.fragment)), [FragmentID("project"), FragmentID("renamed")])
+    }
+
+    func testARenamedReferenceKeepsTheLineItStandsOn() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("127.0.0.1\tlocalhost\n", to: "fragments/base.hosts")
+        try store.write(
+            """
+            # the office stack
+              base   # published by IT
+
+            project
+            not a name
+            base # named twice
+            """,
+            to: "profiles/work.profile"
+        )
+
+        try store.writer.rename(fragment: FragmentID("base"), to: FragmentID("renamed"))
+
+        XCTAssertEqual(
+            try store.text("profiles/work.profile"),
+            """
+            # the office stack
+              renamed   # published by IT
+
+            project
+            not a name
+            renamed # named twice
+            """
+        )
+    }
+
+    func testAProfileThatDoesNotNameTheRenamedFragmentIsLeftExactlyAsItWas() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("127.0.0.1\tlocalhost\n", to: "fragments/base.hosts")
+        try store.write("10.0.0.9\talpha.example\n", to: "fragments/project.hosts")
+        try store.write("project\n", to: "profiles/work.profile")
+        let profile = store.layout.profileURL(ProfileID("work"))
+        let before = try snapshot(of: profile)
+
+        try store.writer.rename(fragment: FragmentID("base"), to: FragmentID("renamed"))
+
+        XCTAssertEqual(try snapshot(of: profile), before)
     }
 
     func testDeletingWhatTheStoreDoesNotHoldReportsNothingToDo() throws {
