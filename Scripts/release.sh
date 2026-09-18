@@ -47,7 +47,9 @@ step() {
 }
 
 usage() {
-    sed -n '3,27p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
+    # Every comment line above the code, so a line added to the header cannot
+    # quietly shorten what --help prints.
+    awk 'NR > 2 && !/^#/ { exit } NR > 2 { print }' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//'
 }
 
 while [ $# -gt 0 ]; do

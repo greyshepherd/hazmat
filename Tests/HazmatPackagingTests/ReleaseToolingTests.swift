@@ -531,4 +531,31 @@ final class ReleaseToolingTests: XCTestCase {
             "the feed repeats the address the release configuration owns"
         )
     }
+
+    // MARK: - Every script's help is its header
+
+    /// A hardcoded line range stops naming the end of a header the moment a line is
+    /// added to it, and the truncation is silent: four of these printed half a
+    /// sentence before the ranges were replaced.
+    func testEveryScriptHelpCarriesItsWholeHeader() throws {
+        let directory = repositoryRoot().appendingPathComponent("Scripts")
+        let scripts = try FileManager.default.contentsOfDirectory(atPath: directory.path)
+            .filter { $0.hasSuffix(".sh") }
+            .sorted()
+        XCTAssertGreaterThan(scripts.count, 3, "the scan found almost nothing to check")
+
+        for script in scripts {
+            let source = try String(contentsOf: directory.appendingPathComponent(script), encoding: .utf8)
+            let header = source.components(separatedBy: "\n").dropFirst(2).prefix { $0.hasPrefix("#") }
+            let lastLine = try XCTUnwrap(header.last, "\(script) carries no header")
+            let line = lastLine.replacingOccurrences(of: "^# ?", with: "", options: .regularExpression)
+
+            let printed = try run(script, ["--help"])
+            XCTAssertEqual(printed.status, 0, "\(script) --help: \(printed.output)")
+            XCTAssertTrue(
+                printed.output.contains(line),
+                "\(script) --help stops before its header ends, missing: \(line)"
+            )
+        }
+    }
 }
