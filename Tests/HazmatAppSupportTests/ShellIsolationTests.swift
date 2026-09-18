@@ -261,6 +261,30 @@ final class ShellIsolationTests: XCTestCase {
         )
     }
 
+    /// The commands the menu bar used to carry are offered where they act, and
+    /// the scene declares no menu for a store item type: a menu bar cannot name
+    /// the row a rename, a duplicate or a delete would act on.
+    func testTheCommandsThatLeftTheMenuBarAreOfferedWhereTheyAct() {
+        let commands = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellCommands.swift" }?.1 ?? ""
+        XCTAssertFalse(commands.isEmpty, "the commands scene is missing")
+        XCTAssertNil(commands.range(of: "CommandMenu(\"Profiles\")"), commands)
+        XCTAssertNil(commands.range(of: "CommandMenu(\"Fragments\")"), commands)
+
+        let sidebar = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "SidebarView.swift" }?.1 ?? ""
+        XCTAssertTrue(sidebar.contains("contextMenu"), sidebar)
+        XCTAssertTrue(sidebar.contains("model.beginRename()"), sidebar)
+        XCTAssertTrue(sidebar.contains("model.beginDuplicate()"), sidebar)
+        XCTAssertTrue(sidebar.contains("model.deleteSelected()"), sidebar)
+
+        // The restore is offered beside the write state, and the drift overwrite
+        // for the block the reading found.
+        let status = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusRow.swift" }?.1 ?? ""
+        XCTAssertTrue(status.contains("model.requestRevert()"), status)
+
+        let menu = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMenu.swift" }?.1 ?? ""
+        XCTAssertTrue(menu.contains("model.overwriteDrift(with: profile, liveBlock: block)"), menu)
+    }
+
     /// The menu bar scene renders the presentation; it does not name labels,
     /// decide item sets, or read the store and the file itself.
     func testTheMenuBarSceneDecidesNothingItself() {

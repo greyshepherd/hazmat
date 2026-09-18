@@ -28,6 +28,7 @@ struct ShellView: View {
         )
         .toolbar { toolbar }
         .frame(minWidth: 880, minHeight: 560)
+        .background(WindowReader { model.windowChanged($0) })
         .task { model.refresh() }
         .onChange(of: model.searchText) { _, _ in model.searchChanged() }
         .onChange(of: model.searchFocusRequests) { _, _ in searchPresented = true }

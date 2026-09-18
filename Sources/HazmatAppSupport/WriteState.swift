@@ -2,8 +2,8 @@ import Foundation
 import HazmatCore
 
 /// What the window can be asked to do. The phase names the one prominent
-/// action; the menus name all of them, so an action the window hides is still
-/// reachable.
+/// action; each surface offers the rest where it acts, so an action the window
+/// hides is still reachable.
 public enum WindowAction: Equatable, Sendable {
     case createStore
     case chooseLocation

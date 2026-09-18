@@ -1,5 +1,24 @@
+import AppKit
 import HazmatAppSupport
 import SwiftUI
+
+/// The window the shell is in, so a keystroke that acts on the sidebar's
+/// selection can require the window showing it to be the key one: a sheet, the
+/// settings window and the store chooser are each key at times, and none of them
+/// shows the row the keystroke would act on.
+struct WindowReader: NSViewRepresentable {
+    let tell: (NSWindow?) -> Void
+
+    func makeNSView(context: Context) -> NSView {
+        let view = NSView()
+        DispatchQueue.main.async { tell(view.window) }
+        return view
+    }
+
+    func updateNSView(_ nsView: NSView, context: Context) {
+        DispatchQueue.main.async { tell(nsView.window) }
+    }
+}
 
 extension StatusTone {
     /// The colour the system pairs with a state. A state is still carried by a

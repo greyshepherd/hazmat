@@ -27,7 +27,6 @@ final class CommandPresentationTests: XCTestCase {
     private func commands(
         _ fixture: StoreFixture,
         helper: HelperState = .enabled,
-        canRevert: Bool = false,
         hasUnsavedEdit: Bool = false,
         update: UpdateAvailability = .unavailable,
         selection: SidebarSelection? = .profile(ProfileID("work"))
@@ -36,7 +35,6 @@ final class CommandPresentationTests: XCTestCase {
         return CommandPresentation.menuBar(
             editor: editor,
             helper: helper,
-            canRevert: canRevert,
             hasUnsavedEdit: hasUnsavedEdit,
             update: update
         )
@@ -50,10 +48,10 @@ final class CommandPresentationTests: XCTestCase {
 
         let menus = commands(fixture).menus
 
-        XCTAssertEqual(menus.map(\.id), ["app", "file", "edit", "profiles", "fragments", "hosts", "window", "help"])
+        XCTAssertEqual(menus.map(\.id), ["app", "file", "edit", "hosts", "window", "help"])
         XCTAssertEqual(
             menus.map(\.title),
-            ["Hazmat", "File", "Edit", "Profiles", "Fragments", "Hosts", "Window", "Help"]
+            ["Hazmat", "File", "Edit", "Hosts", "Window", "Help"]
         )
         // The application menu holds the update check when the bundle declares a
         // feed, and the settings scene and the platform fill the rest of it.
@@ -62,7 +60,11 @@ final class CommandPresentationTests: XCTestCase {
         }
     }
 
-    func testEveryWindowActionHasAMenuItem() throws {
+    /// The menu bar carries the commands whose subject is the application, the
+    /// store, or the live file. A command that acts on the selection is offered
+    /// on the row that shows it, and one that acts on the live block where the
+    /// block was read: a menu bar cannot name either.
+    func testTheMenuBarCarriesNoCommandThatActsOnASelectionOrTheLiveBlock() throws {
         let fixture = try fixture()
         defer { fixture.remove() }
 
@@ -70,8 +72,8 @@ final class CommandPresentationTests: XCTestCase {
         // not offered is part of the set being checked.
         let actions = Set(commands(fixture, update: .available).menus.flatMap(\.items).map(\.action))
         let expected: Set<WindowAction> = [
-            .createStore, .chooseLocation, .newProfile, .newFragment, .apply, .revert, .overwriteDrift,
-            .removeBlock, .reload, .rename, .duplicate, .delete, .save, .installHelper, .repairHelper,
+            .createStore, .chooseLocation, .newProfile, .newFragment, .apply,
+            .removeBlock, .reload, .save, .installHelper, .repairHelper,
             .revealHostsFile, .toggleSidebar, .search, .showHelp, .checkForUpdates
         ]
 
@@ -87,8 +89,6 @@ final class CommandPresentationTests: XCTestCase {
         XCTAssertEqual(commands.item("new-fragment")?.shortcut?.display, "⇧⌘N")
         XCTAssertEqual(commands.item("reload")?.shortcut?.display, "⌘R")
         XCTAssertEqual(commands.item("apply")?.shortcut?.display, "⌘⏎")
-        XCTAssertEqual(commands.item("duplicate-profile")?.shortcut?.display, "⌘D")
-        XCTAssertEqual(commands.item("delete-profile")?.shortcut?.display, "⌘⌫")
         XCTAssertEqual(commands.item("search")?.shortcut?.display, "⌘F")
         XCTAssertEqual(commands.item("save")?.shortcut?.display, "⌘S")
         XCTAssertEqual(commands.item("toggle-sidebar")?.shortcut?.display, "⌃⌘S")
@@ -140,7 +140,7 @@ final class CommandPresentationTests: XCTestCase {
         XCTAssertEqual(commands.item("check-for-updates")?.action, .checkForUpdates)
     }
 
-    func testTheActionsThatActOnTheSelectionAreOffWithoutOne() throws {
+    func testTheActionsThatActOnTheSelectionAreOfferedOnTheRowInstead() throws {
         let fixture = try fixture()
         defer { fixture.remove() }
         // A search that hides the selection leaves the window with nothing
@@ -150,13 +150,17 @@ final class CommandPresentationTests: XCTestCase {
         let commands = CommandPresentation.menuBar(
             editor: editor,
             helper: .enabled,
-            canRevert: false,
             hasUnsavedEdit: false
         )
 
-        XCTAssertTrue(commands.item("rename-profile")?.isEnabled == false)
-        XCTAssertTrue(commands.item("duplicate-profile")?.isEnabled == false)
-        XCTAssertTrue(commands.item("delete-profile")?.isEnabled == false)
+        for id in ["rename-profile", "duplicate-profile", "delete-profile", "rename-fragment",
+                   "duplicate-fragment", "delete-fragment", "revert", "overwrite-drift"] {
+            XCTAssertNil(commands.item(id), "\(id) acts on a row or on the block that was read")
+        }
+        XCTAssertTrue(
+            commands.item("apply")?.isEnabled == false,
+            "an apply acts on the selection, so no selection leaves it unusable and unoffered"
+        )
     }
 
     func testTheWriteCommandsFollowTheWriteState() throws {
@@ -165,7 +169,6 @@ final class CommandPresentationTests: XCTestCase {
 
         let pending = commands(fixture)
         XCTAssertTrue(pending.item("apply")?.isEnabled == true, "a pending write can be applied")
-        XCTAssertTrue(pending.item("revert")?.isEnabled == false, "nothing has been applied this session")
 
         let blocked = commands(fixture, helper: .notRegistered)
         XCTAssertTrue(blocked.item("apply")?.isEnabled == false, "a blocked write is not offered")
@@ -181,9 +184,6 @@ final class CommandPresentationTests: XCTestCase {
             "a registered helper is not installed again"
         )
         XCTAssertTrue(notAnswering.item("repair-helper")?.isEnabled == true)
-
-        let reverted = commands(fixture, canRevert: true)
-        XCTAssertTrue(reverted.item("revert")?.isEnabled == true)
 
         let helperReady = commands(fixture, helper: .enabled)
         XCTAssertTrue(helperReady.item("install-helper")?.isEnabled == false, "an enabled helper needs no install item")
@@ -213,7 +213,7 @@ final class CommandPresentationTests: XCTestCase {
         let live = try LiveFile("127.0.0.1\tlocalhost\n")
         defer { live.remove() }
         let missing = EditorModel(storeRoot: root, fileURL: live.url, writer: UnregisteredHelper()).read()
-        let commands = CommandPresentation.menuBar(editor: missing, helper: .enabled, canRevert: false, hasUnsavedEdit: false)
+        let commands = CommandPresentation.menuBar(editor: missing, helper: .enabled, hasUnsavedEdit: false)
 
         XCTAssertTrue(commands.item("create-store")?.isEnabled == true)
         XCTAssertTrue(commands.item("new-profile")?.isEnabled == true, "a first profile is offered before a store exists")

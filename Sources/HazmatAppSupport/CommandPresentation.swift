@@ -1,8 +1,8 @@
 import Foundation
 
-/// The menu bar as a value: File, Edit, Profiles, Fragments, Hosts, Window and
-/// Help, each item's shortcut, and whether this state can perform it. The scene
-/// renders it, so the menu bar and the window act on the same model.
+/// The menu bar as a value: File, Edit, Hosts, Window and Help, each item's
+/// shortcut, and whether this state can perform it. The scene renders it, so the
+/// menu bar and the window act on the same model.
 public struct CommandPresentation: Equatable, Sendable {
     public struct Shortcut: Equatable, Sendable {
         /// A character, or `delete` or `return`.
@@ -73,11 +73,9 @@ public struct CommandPresentation: Equatable, Sendable {
     public static func menuBar(
         editor: EditorPresentation,
         helper: HelperState,
-        canRevert: Bool,
         hasUnsavedEdit: Bool,
         update: UpdateAvailability = .unavailable
     ) -> CommandPresentation {
-        let hasSelection = editor.selection != nil
         let holdsABlock = editor.live.holdsABlock
         let pending = editor.writeState(helper: helper).isPending
 
@@ -116,22 +114,10 @@ public struct CommandPresentation: Equatable, Sendable {
             Menu(id: "edit", title: "Edit", items: [
                 item("search", "Search", .search, Shortcut("f", .command))
             ]),
-            Menu(id: "profiles", title: "Profiles", items: [
-                item("rename-profile", "Rename Profile…", .rename, enabled: hasSelection),
-                item("duplicate-profile", "Duplicate Profile…", .duplicate, Shortcut("d", .command), enabled: hasSelection),
-                item("delete-profile", "Delete Profile", .delete, Shortcut("delete", .command), enabled: hasSelection)
-            ]),
-            Menu(id: "fragments", title: "Fragments", items: [
-                item("rename-fragment", "Rename Fragment…", .rename, enabled: hasSelection),
-                item("duplicate-fragment", "Duplicate Fragment…", .duplicate, enabled: hasSelection),
-                item("delete-fragment", "Delete Fragment", .delete, enabled: hasSelection)
-            ]),
             Menu(id: "hosts", title: "Hosts", items: [
                 item("apply", "Apply the Selected Profile", .apply, Shortcut("return", .command), enabled: pending),
-                item("revert", "Revert the Last Apply", .revert, enabled: canRevert),
                 item("reveal", "Reveal Hosts File", .revealHostsFile, enabled: holdsABlock),
                 item("reload", "Reload from Disk", .reload, Shortcut("r", .command)),
-                item("overwrite-drift", "Overwrite the Drifted Block…", .overwriteDrift, enabled: editor.live.liveBlock != nil),
                 item("remove-block", "Remove the Managed Block…", .removeBlock, enabled: holdsABlock),
                 item("create-store", "Create Store", .createStore, enabled: !editor.storeExists),
                 item("choose-location", "Choose Store Location…", .chooseLocation),

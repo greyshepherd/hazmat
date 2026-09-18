@@ -109,6 +109,13 @@ final class ShellModel {
     /// Set once on the main actor and read only in `deinit`, which the actor
     /// isolation cannot see into.
     private nonisolated(unsafe) var dockObserver: (any NSObjectProtocol)?
+    /// The monitor that answers the window's own keystrokes, held for the same
+    /// reason, so it can be removed when the model goes away.
+    private nonisolated(unsafe) var shortcutMonitor: Any?
+    /// The window the shell is shown in. A keystroke the window answers without a
+    /// menu bar item acts on the sidebar's selection, which only that window
+    /// shows.
+    @ObservationIgnored private weak var shellWindow: NSWindow?
 
     /// How long an answer is trusted while it says the helper is answering. A
     /// check costs a round trip that can take its whole bound when nothing
@@ -159,6 +166,62 @@ final class ShellModel {
                 self?.matchDockPresenceToTheWindows(ignoring: closing)
             }
         }
+        // A local monitor sees a keystroke before it is dispatched, which is what
+        // lets one the text system has a better use for be passed on rather than
+        // taken from it. The handler runs outside the main actor, so it carries
+        // the keystroke in as values and the answer back as a flag: the event
+        // itself never crosses that boundary.
+        shortcutMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            let keystroke = Self.keystroke(of: event)
+            let answered = MainActor.assumeIsolated {
+                self?.answer(keystroke) ?? false
+            }
+            return answered ? nil : event
+        }
+    }
+
+    // MARK: - The window's own keystrokes
+
+    /// The window the shell is shown in, told by the scene that renders it.
+    func windowChanged(_ window: NSWindow?) {
+        shellWindow = window
+    }
+
+    /// Answers a keystroke the window binds without a menu bar item, and reports
+    /// whether it took it. An answered keystroke is consumed, so nothing acts on
+    /// it twice.
+    private func answer(_ keystroke: (characters: String, modifiers: CommandPresentation.Modifiers)) -> Bool {
+        guard acceptsWindowShortcuts else { return false }
+        guard let action = WindowShortcut.action(
+            characters: keystroke.characters,
+            modifiers: keystroke.modifiers,
+            textEditing: NSApp.keyWindow?.firstResponder is NSTextView
+        ) else { return false }
+
+        perform(action)
+        return true
+    }
+
+    /// Whether the keystroke belongs to the window that shows the selection. A
+    /// sheet, the settings window and the store chooser are each key at times,
+    /// and a keystroke answered there would act on a row none of them shows.
+    private var acceptsWindowShortcuts: Bool {
+        guard let shellWindow, NSApp.keyWindow === shellWindow, shellWindow.isVisible else { return false }
+        return NSApp.modalWindow == nil
+    }
+
+    /// The keystroke an event carries, as values that can cross out of the
+    /// handler's own isolation.
+    private nonisolated static func keystroke(
+        of event: NSEvent
+    ) -> (characters: String, modifiers: CommandPresentation.Modifiers) {
+        var modifiers: CommandPresentation.Modifiers = []
+        let flags = event.modifierFlags
+        if flags.contains(.command) { modifiers.insert(.command) }
+        if flags.contains(.shift) { modifiers.insert(.shift) }
+        if flags.contains(.option) { modifiers.insert(.option) }
+        if flags.contains(.control) { modifiers.insert(.control) }
+        return (event.charactersIgnoringModifiers ?? "", modifiers)
     }
 
     // MARK: - What the scene renders
@@ -217,7 +280,6 @@ final class ShellModel {
         CommandPresentation.menuBar(
             editor: editor,
             helper: helper,
-            canRevert: canRevert,
             hasUnsavedEdit: fragmentIsDirty,
             update: updateAvailability
         )
@@ -801,6 +863,9 @@ final class ShellModel {
     }
 
     deinit {
+        if let shortcutMonitor {
+            NSEvent.removeMonitor(shortcutMonitor)
+        }
         if let dockObserver {
             NotificationCenter.default.removeObserver(dockObserver)
         }

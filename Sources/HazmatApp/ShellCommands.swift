@@ -21,12 +21,6 @@ struct ShellCommands: Commands {
         CommandGroup(after: .pasteboard) {
             items("edit")
         }
-        CommandMenu("Profiles") {
-            items("profiles")
-        }
-        CommandMenu("Fragments") {
-            items("fragments")
-        }
         CommandMenu("Hosts") {
             items("hosts")
         }
