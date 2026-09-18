@@ -92,7 +92,7 @@ stops before it submits anything.
 ## Publishing
 
 ```
-Scripts/publish.sh --artifact build/release/Hazmat-1.0.0.dmg
+Scripts/publish.sh --artifact build/release/Hazmat-<version>.dmg
 ```
 
 The step reads the published feed first and refuses a build number that is not

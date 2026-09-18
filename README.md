@@ -56,7 +56,7 @@ reports, what it loads, and how it is signed.
 
 ```
 Scripts/release.sh    # assemble, sign, notarize, staple, and assess
-Scripts/publish.sh --artifact build/release/Hazmat-1.0.0.dmg
+Scripts/publish.sh --artifact build/release/Hazmat-<version>.dmg
 ```
 
 `release/README.md` describes the configuration both steps read, the credentials
