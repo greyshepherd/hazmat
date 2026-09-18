@@ -9,5 +9,15 @@
     <title>Hazmat</title>
     <description>Hazmat releases</description>
     <language>en</language>
+    <item xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">
+      <title>Hazmat 1.0.0</title>
+      <pubDate>Fri, 18 Sep 2026 13:40:25 +0000</pubDate>
+      <sparkle:version>1</sparkle:version>
+      <sparkle:shortVersionString>1.0.0</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+      <sparkle:releaseNotesLink>https://github.com/greyshepherd/hazmat/releases/tag/v1.0.0</sparkle:releaseNotesLink>
+      <enclosure url="https://github.com/greyshepherd/hazmat/releases/download/v1.0.0/Hazmat-1.0.0.dmg" length="2326383" type="application/octet-stream" sparkle:edSignature="uVRPyiV6Jxk+R6vDkoivzyq/o4sf9X8ktkhXHo/1VcscRFSh8wjOUyYRpAhxCURHHO/XrzPKmR7ck6OMHPMbDw==" />
+    </item>
   </channel>
 </rss>
