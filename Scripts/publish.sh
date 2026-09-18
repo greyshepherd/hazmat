@@ -233,9 +233,12 @@ ENTRY="$("$ROOT/Scripts/appcast-entry.sh" \
 # than a stale one, and the whole file is what a client fetches.
 insert_entry() {
     local target
-    target="$(grep -n '<item' "$FEED_FILE" | sed -n '1p' | cut -d: -f1)"
+    # `sed =;q` prints the first matching line's number and stops. A grep that
+    # matched nothing would fail this assignment under `pipefail`, which is the
+    # ordinary case for a feed that holds no items yet.
+    target="$(sed -n '/<item/{=;q;}' "$FEED_FILE")"
     if [ -z "$target" ]; then
-        target="$(grep -n '</channel>' "$FEED_FILE" | sed -n '1p' | cut -d: -f1)"
+        target="$(sed -n '/<\/channel>/{=;q;}' "$FEED_FILE")"
     fi
     [ -n "$target" ] || fail "the feed has no channel to put an item in"
 
