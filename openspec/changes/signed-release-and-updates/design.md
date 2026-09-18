@@ -76,20 +76,22 @@ SwiftPM resource bundle (`Bundle.module`), which only SwiftPM builds produce, so
 the release layout would need a second lookup path; drawing the mark in code
 (re-implements a brand asset, and the export exists precisely so nothing does).
 
-**4. The mark joins the title instead of replacing it.** The status item keeps
-naming the state, because that is what the switcher is for, and gains the mark
-beside it. Whether the platform renders an image and a title together in a
-`MenuBarExtra` label is not documented, so the first task after wiring it is an
-empirical check against the running app; if the platform renders only one of the
-two, the fallback is an AppKit status item that sets the image and the title
-directly, with the same presentation feeding it. _Alternative_: an image-only
-status item (loses the state the spec requires, and the mark alone says nothing
-about what is on).
+**4. The mark is a template image the app loads from its own bundle.** One file
+reads the PNG pair out of the main bundle, attaches the two-times representation
+by hand, and sets the template flag, so the system tints the mark for the
+appearance and the highlight and the app never colours it. The status item's
+presentation is decided elsewhere — the window's change makes it the mark alone,
+with the state in the menu and in the item's accessibility label — and this change
+only supplies the image. _Alternatives_: a SwiftPM resource bundle, which only
+SwiftPM builds produce, so a release layout would need a second lookup path;
+drawing the mark in code, which re-implements a brand asset that exists precisely
+so nothing does.
 
 _Checked before anything was built on it_: a label holding the image and the text
 produces a status button whose title is the state and whose image is the mark with
-its template flag set, so both render natively and no fallback is needed. A bundle
-whose mark is missing renders the title alone, which is the documented fallback.
+its template flag set, so both render natively. The image alone renders too, which
+is what the window's change uses; a bundle whose mark is missing renders a usable
+item with no image.
 
 **5. Sparkle sits behind an app-support protocol.** The presentation gains an
 item and the model forwards a choice; the only code that imports the framework is

@@ -17,8 +17,8 @@
 
 ## 3. The mark in the status item
 
-- [x] 3.1 Load the menu bar template from the main bundle, set it as a template image, and place it beside the state title. Verify the status item shows both in a running build, and that a bundle with the image removed still shows a usable item with the title alone
-- [x] 3.2 Check the combined image and title against the running menu bar rather than against the documentation, in a dark and a light appearance. If the platform renders only one of the two, move the status item to an AppKit status item that sets the image and the title directly, fed by the same presentation
+- [x] 3.1 Load the menu bar template from the main bundle, set it as a template image, and hand it to the status item. Verified: `MenuMark` reads the one-times and two-times files by name, attaches the two-times representation, and sets the template flag, and the running bundle's status item shows the mark; the window's own change then made the item the mark alone, with the state in its accessibility label and its menu, which is what the main spec now requires
+- [x] 3.2 Check the mark against the running menu bar rather than against the documentation. Verified: a label holding the image and the text renders both, so no AppKit fallback is needed, and the image alone renders too, which is what the status item shows; the state is still readable, from the item's accessibility label and from the menu's first section
 - [x] 3.3 Update the isolation tests that assert what the entry point contains, and add a guard that the app never recolours or untemplates the mark. Verify the suite passes and that a deliberate tint in a copy of the scene is caught
 
 ## 4. The update channel in the app
@@ -61,7 +61,7 @@
 
 - [ ] 9.1 Install 1.0 from the disk image, register and approve the helper from that location, confirm its state reads as answering, and apply a profile. Cut 1.1, upgrade from the app's own menu, and verify the app reports 1.1, the store and the live block are untouched, an apply through the helper still succeeds, and the daemon that answers is the updated build
 - [ ] 9.2 Verify a tampered archive is refused: alter one byte of a published image and confirm the app refuses the update and reports a signature failure
-- [ ] 9.3 Verify the installed build's status item shows the mark beside the state title in both menu bar appearances, and that switching a profile from the menu still works after the upgrade
+- [ ] 9.3 Verify the installed build's status item shows the mark in both menu bar appearances, that its accessibility label names the state, and that switching a profile from the menu still works after the upgrade
 
 ## 10. Documentation and the guard
 
