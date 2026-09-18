@@ -108,10 +108,10 @@ final class ShellModel {
     private var repairInFlight = false
     /// Set once on the main actor and read only in `deinit`, which the actor
     /// isolation cannot see into.
-    private nonisolated(unsafe) var dockObserver: (any NSObjectProtocol)?
+    @ObservationIgnored private nonisolated(unsafe) var dockObserver: (any NSObjectProtocol)?
     /// The monitor that answers the window's own keystrokes, held for the same
     /// reason, so it can be removed when the model goes away.
-    private nonisolated(unsafe) var shortcutMonitor: Any?
+    @ObservationIgnored private nonisolated(unsafe) var shortcutMonitor: Any?
     /// The window the shell is shown in. A keystroke the window answers without a
     /// menu bar item acts on the sidebar's selection, which only that window
     /// shows.

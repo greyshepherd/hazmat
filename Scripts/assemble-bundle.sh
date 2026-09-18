@@ -363,9 +363,18 @@ PLIST
 # MARK: - Sign
 
 sign() {
-    local target="$1"
+    local target="$1" output
     shift
-    codesign "${SIGN_FLAGS[@]}" "$@" "$target"
+    # Every target here already carries a signature: the linker signs what it
+    # links, and the framework ships signed. codesign notes that it replaces one,
+    # which is expected and says nothing. Whatever else it says is worth reading,
+    # and a failure keeps its whole message.
+    if ! output="$(codesign "${SIGN_FLAGS[@]}" "$@" "$target" 2>&1)"; then
+        printf '%s\n' "$output" >&2
+        return 1
+    fi
+    [ -n "$output" ] || return 0
+    printf '%s\n' "$output" | grep -v 'replacing existing signature$' >&2 || true
 }
 
 # Inside out: the framework's services and helpers, then the framework, then the

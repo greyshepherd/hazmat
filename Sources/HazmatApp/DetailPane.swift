@@ -163,7 +163,7 @@ struct DetailPane: View {
         }
 
         let entries = editor.entryCount(of: fragment) ?? 0
-        Text("\(fragment) holds \(entries) \(entries == 1 ? "entry" : "entries").")
+        Text("\(fragment.rawValue) holds \(entries) \(entries == 1 ? "entry" : "entries").")
             .font(.caption)
             .foregroundStyle(.secondary)
 
