@@ -1,71 +1,83 @@
-# Hazmat
+<div align="center">
+  <img src="Assets/icon-512.png" width="128" alt="The Hazmat icon: a gas mask on a dark tile">
+  <h1>Hazmat</h1>
+  <p><strong>A hosts file manager for Apple Silicon Macs.</strong></p>
+  <p>
+    <a href="https://github.com/greyshepherd/hazmat/releases/latest">Download</a> ·
+    <a href="CHANGELOG.md">Changelog</a> ·
+    <a href="LICENSE">MIT License</a>
+  </p>
+</div>
 
-A hosts file manager for Apple Silicon Macs.
+---
 
-Hazmat is an open-source replacement for [Gas Mask](https://github.com/2ndalpha/gasmask), written from scratch for modern Apple Silicon hardware. It does one job: editing `/etc/hosts` and switching between named hosts profiles.
+Hazmat keeps named profiles of hosts entries — local development overrides, a
+tracker blocklist, a staging environment — and switches between them from the
+menu bar. It is an open-source replacement for
+[Gas Mask](https://github.com/2ndalpha/gasmask), written from scratch for
+Apple Silicon.
 
-## Why another hosts manager
+<p align="center">
+  <img src="Assets/screenshot.png" alt="The Hazmat window: profiles and fragments on the left, the work profile's two layers in the middle, and the 46 entries they resolve to on the right" width="85%">
+</p>
 
-- **Apple Silicon only.** arm64 native, no Intel or Rosetta code paths.
-- **Modern Swift and SwiftUI.** No Objective-C era foundations.
-- **Focused surface.** Profile editing, activation, and a menu bar switcher.
+## Features
 
-## Status
+- **Profiles and fragments.** A profile is an ordered list of fragments —
+  reusable blocks of entries shared between profiles. Later layers win
+  conflicts, so a one-line override can sit on top of a 45-entry blocklist.
+- **Menu bar switcher.** The menu bar shows the current state at a glance and
+  switches profiles without opening a window. Closing the window leaves Hazmat
+  in the menu bar.
+- **See it before it lands.** The window shows a profile's layers and the
+  exact block they resolve to — as text or a table — before anything is
+  written to `/etc/hosts`.
+- **Applying is a review step.** A confirmation names the file and the entry
+  count, the block it replaces is kept so the change can be reverted, and
+  overwriting an edit made by another tool is confirmed as destructive.
+- **Drift detection.** The active profile is read back from the file's bytes,
+  so an edit made outside Hazmat is reported as drift rather than silently
+  overwritten.
+- **Signed updates.** Releases are signed, notarized, and stapled; installed
+  copies check for newer builds and update from inside the app.
 
-Applying, switching, and editing work. The composition and block-rendering core
-resolves a profile into a managed block and splices it into `/etc/hosts`
-byte-preservingly, and an approved daemon installs or removes that block. The
-window shows three panes at once — the store's profiles and fragments, the
-selected item, and the block it resolves to — and offers one next step whatever
-state it is in: no store, no profiles, a profile with no layers, changes pending,
-in sync, or a blocked write. Applying is a review step: a confirmation names the
-file and the entry count, the block it replaced is kept so the change can be
-reverted, and overwriting drift or removing the block is confirmed as
-destructive. The store's location is choosable in Settings, and `HAZMAT_STORE_ROOT`
-names it from the environment instead, where it is authoritative over the choice
-made in the window — which is what keeps a development or test store apart from
-the real one. A menu bar item carries the mark alone, with the
-state in its accessibility label and its menu: the menu marks the active profile,
-switches between profiles, offers a deliberate overwrite for a block no profile
-owns, turns the block off, and opens or quits the application. Closing the window
-leaves the application in the menu bar alone. The active profile is derived from
-the file's bytes, so an edit made by another tool is reported as drift rather
-than overwritten. Editing the store needs no privilege, and it stays inside the
-store.
+## How it works
 
-The daemon accepts finished bytes only, and the store stays the source of truth.
-It requires the team the running binary was signed with, so a distribution build
-cannot accept an ad-hoc client, and it stops after a period with no open
-connection so a replaced build cannot keep answering. The release path is
-complete: one assembler builds the development and release bundles from one
-configuration, `Scripts/release.sh` signs, notarizes, staples, and assesses the
-artifact, and `Scripts/publish.sh` uploads it and publishes the feed entry naming
-it. What is left is the one-time setup a first release needs, and the upgrade it
-is accepted by.
+A profile's fragments resolve, in order, into a single block of entries between
+`# >>> hazmat:managed v1 >>>` markers. A privileged helper — installed once
+from the app, and which only accepts bytes signed by the same team — splices
+that block into `/etc/hosts` and leaves every other line of the file untouched.
+The app itself needs no privileges: profiles are edited in a plain folder on
+disk (its location is choosable in Settings), and that store, not the hosts
+file, is the source of truth. Switching profiles or turning the block off
+restores the rest of the file exactly as it was.
 
-## Building
+## Requirements
 
-```
-Scripts/assemble-bundle.sh debug     # signed ad-hoc, declares no feed
-Scripts/assemble-bundle.sh release   # signed with a Developer ID, declares the feed
-open build/Hazmat.app
-```
+- A Mac with Apple silicon
+- macOS 15 (Sequoia) or later
 
-`Scripts/verify-bundle.sh build/Hazmat.app` reports what a bundle carries, what it
-reports, what it loads, and how it is signed.
+## Installing
 
-## Releasing
+Download the disk image from
+[the latest release](https://github.com/greyshepherd/hazmat/releases/latest),
+open it, and drag Hazmat to your Applications folder. On first apply, Hazmat
+offers to install its helper — the one step that needs your password, and the
+only thing that gives it permission to write `/etc/hosts`.
 
-```
-Scripts/release.sh    # assemble, sign, notarize, staple, and assess
-Scripts/publish.sh --artifact build/release/Hazmat-<version>.dmg
-```
+Updates are offered from the app's menu bar menu once a newer build is
+published.
 
-`release/README.md` describes the configuration both steps read, the credentials
-they take from the environment, and the one-time setup a first release needs.
-Installed copies check `https://greyshepherd.github.io/hazmat/appcast.xml` for a
-newer build.
+## Documentation
+
+| Document | What it covers |
+| --- | --- |
+| [CHANGELOG.md](CHANGELOG.md) | What changed in each release |
+| [BUILDING.md](BUILDING.md) | Build and test from source |
+| [RELEASE.md](RELEASE.md) | Cutting and publishing a release (maintainers) |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Reporting bugs and sending changes |
+| [LICENSE](LICENSE) | MIT |
 
 ## License
 
-MIT
+[MIT](LICENSE) © Grey Shepherd

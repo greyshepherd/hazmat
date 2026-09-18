@@ -16,3 +16,7 @@ so the icon carries no corner geometry of its own.
 
 `Scripts/assemble-bundle.sh` copies all three into the bundle's
 `Contents/Resources` and names `Hazmat.icns` in the bundle's property list.
+
+Two files here are not bundle assets and the assembler does not touch them:
+`icon-512.png` and `screenshot.png` are the images the README shows, converted
+from the icon and captured from the running app.
