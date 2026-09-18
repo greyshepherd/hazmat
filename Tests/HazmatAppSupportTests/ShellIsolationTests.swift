@@ -233,6 +233,34 @@ final class ShellIsolationTests: XCTestCase {
         }
     }
 
+    /// The application menu's settings item belongs to the settings scene, which
+    /// declares it. A command group that replaces that group renders a second one,
+    /// so the menu shows the same control twice.
+    func testTheApplicationMenuDoesNotRenderASecondSettingsItem() {
+        let commands = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellCommands.swift" }?.1 ?? ""
+        XCTAssertFalse(commands.isEmpty, "the commands scene is missing")
+
+        XCTAssertNil(
+            commands.range(of: "replacing: .appSettings"),
+            "the settings item is the settings scene's own: \(commands)"
+        )
+        XCTAssertNil(commands.range(of: "openSettings()"), "the settings scene opens itself: \(commands)")
+    }
+
+    /// The commands scene renders the model's one value. Rebuilding it is a second
+    /// copy that can disagree with it, and the update check it would drop is the
+    /// kind of disagreement nothing else catches.
+    func testTheCommandsSceneRendersTheModelsOwnMenu() {
+        let commands = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellCommands.swift" }?.1 ?? ""
+        XCTAssertFalse(commands.isEmpty, "the commands scene is missing")
+
+        XCTAssertTrue(commands.contains("model.commands"), commands)
+        XCTAssertNil(
+            commands.range(of: "CommandPresentation.menuBar("),
+            "the menu bar is built once, in the model: \(commands)"
+        )
+    }
+
     /// The menu bar scene renders the presentation; it does not name labels,
     /// decide item sets, or read the store and the file itself.
     func testTheMenuBarSceneDecidesNothingItself() {

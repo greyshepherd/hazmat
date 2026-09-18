@@ -98,13 +98,13 @@ public struct CommandPresentation: Equatable, Sendable {
             )
         }
 
-        // The application menu, in the order the platform puts them: the check
-        // before the settings item it sits beside.
+        // The application menu carries the one command the settings scene does not
+        // own: the platform adds the settings item itself, and a second one here
+        // would be the same control twice.
         var application: [Item] = []
         if update != .unavailable {
             application.append(item("check-for-updates", "Check for Updates…", .checkForUpdates))
         }
-        application.append(item("settings", "Settings…", .openSettings, Shortcut(",", .command)))
 
         let menus = [
             Menu(id: "app", title: "Hazmat", items: application),

@@ -23,7 +23,6 @@ public enum WindowAction: Equatable, Sendable {
     /// that is registered but no longer answers.
     case repairHelper
     case revealHostsFile
-    case openSettings
     case toggleSidebar
     case search
     case showHelp
@@ -39,7 +38,7 @@ public enum WindowAction: Equatable, Sendable {
              .apply, .revert, .overwriteDrift, .removeBlock, .rename, .duplicate, .delete,
              .save, .installHelper, .search, .showHelp:
             return true
-        case .reload, .repairHelper, .revealHostsFile, .openSettings, .toggleSidebar, .checkForUpdates:
+        case .reload, .repairHelper, .revealHostsFile, .toggleSidebar, .checkForUpdates:
             return false
         }
     }
@@ -63,7 +62,6 @@ public enum WindowAction: Equatable, Sendable {
         case .installHelper: return "Install Helper…"
         case .repairHelper: return "Repair the Helper…"
         case .revealHostsFile: return "Reveal Hosts File"
-        case .openSettings: return "Settings…"
         case .toggleSidebar: return "Toggle Sidebar"
         case .search: return "Search"
         case .showHelp: return "Hazmat Help"

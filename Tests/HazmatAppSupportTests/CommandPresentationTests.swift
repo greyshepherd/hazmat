@@ -55,7 +55,9 @@ final class CommandPresentationTests: XCTestCase {
             menus.map(\.title),
             ["Hazmat", "File", "Edit", "Profiles", "Fragments", "Hosts", "Window", "Help"]
         )
-        for menu in menus {
+        // The application menu holds the update check when the bundle declares a
+        // feed, and the settings scene and the platform fill the rest of it.
+        for menu in menus where menu.id != "app" {
             XCTAssertFalse(menu.items.isEmpty, "\(menu.title) holds no items")
         }
     }
@@ -70,7 +72,7 @@ final class CommandPresentationTests: XCTestCase {
         let expected: Set<WindowAction> = [
             .createStore, .chooseLocation, .newProfile, .newFragment, .apply, .revert, .overwriteDrift,
             .removeBlock, .reload, .rename, .duplicate, .delete, .save, .installHelper, .repairHelper,
-            .revealHostsFile, .openSettings, .toggleSidebar, .search, .showHelp, .checkForUpdates
+            .revealHostsFile, .toggleSidebar, .search, .showHelp, .checkForUpdates
         ]
 
         XCTAssertEqual(actions, expected)
@@ -88,7 +90,6 @@ final class CommandPresentationTests: XCTestCase {
         XCTAssertEqual(commands.item("duplicate-profile")?.shortcut?.display, "⌘D")
         XCTAssertEqual(commands.item("delete-profile")?.shortcut?.display, "⌘⌫")
         XCTAssertEqual(commands.item("search")?.shortcut?.display, "⌘F")
-        XCTAssertEqual(commands.item("settings")?.shortcut?.display, "⌘,")
         XCTAssertEqual(commands.item("save")?.shortcut?.display, "⌘S")
         XCTAssertEqual(commands.item("toggle-sidebar")?.shortcut?.display, "⌃⌘S")
     }
@@ -101,12 +102,16 @@ final class CommandPresentationTests: XCTestCase {
         let commands = commands(fixture, update: .available)
 
         XCTAssertEqual(
-            commands.menu("app")?.items.map(\.id), ["check-for-updates", "settings"],
-            "the check sits in the application menu, before the settings item"
+            commands.menu("app")?.items.map(\.id), ["check-for-updates"],
+            "the application menu carries the check and nothing the settings scene owns"
         )
         XCTAssertEqual(commands.item("check-for-updates")?.action, .checkForUpdates)
         XCTAssertEqual(commands.item("check-for-updates")?.title, "Check for Updates…")
         XCTAssertTrue(commands.item("check-for-updates")?.isEnabled == true)
+        XCTAssertFalse(
+            commands.menus.flatMap(\.items).contains { $0.title.hasPrefix("Settings") },
+            "the settings scene owns its own item, so a second one would be the same control twice"
+        )
     }
 
     func testTheApplicationMenuOffersNoCheckWithoutAFeed() throws {
@@ -116,7 +121,7 @@ final class CommandPresentationTests: XCTestCase {
         // A development bundle, and a release whose framework could not start.
         for availability in [UpdateAvailability.unavailable] {
             let commands = commands(fixture, update: availability)
-            XCTAssertEqual(commands.menu("app")?.items.map(\.id), ["settings"])
+            XCTAssertEqual(commands.menu("app")?.items.map(\.id), [], "the application menu is empty")
             XCTAssertNil(commands.item("check-for-updates"), "a bundle with no feed can only report that")
             XCTAssertFalse(
                 commands.menus.flatMap(\.items).map(\.action).contains(.checkForUpdates),

@@ -6,11 +6,13 @@ import SwiftUI
 /// the commands value in app support and performed by the one shell model.
 struct ShellCommands: Commands {
     let model: ShellModel
-    @Environment(\.openSettings) private var openSettings
     @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
-        CommandGroup(replacing: .appSettings) {
+        // The application menu's own settings item belongs to the settings scene,
+        // which declares it. This group adds the check beside it, before it, the
+        // way the platform orders them.
+        CommandGroup(before: .appSettings) {
             items("app")
         }
         CommandGroup(replacing: .newItem) {
@@ -36,15 +38,10 @@ struct ShellCommands: Commands {
         }
     }
 
-    private var presentation: CommandPresentation {
-        let editor: EditorPresentation = model.editor
-        return CommandPresentation.menuBar(
-            editor: editor,
-            helper: model.helper,
-            canRevert: model.canRevert,
-            hasUnsavedEdit: model.fragmentIsDirty
-        )
-    }
+    /// The one value the window and the menu bar both render. Rebuilding it here
+    /// would be a second copy that can disagree with the model's, and did: the
+    /// update check the model offered never reached the application menu.
+    private var presentation: CommandPresentation { model.commands }
 
     @ViewBuilder
     private func items(_ menu: String) -> some View {
@@ -61,10 +58,6 @@ struct ShellCommands: Commands {
     /// closed: the window comes back first, and the ask follows once it is
     /// there to present it.
     private func perform(_ item: CommandPresentation.Item) {
-        if item.action == .openSettings {
-            openSettings()
-            return
-        }
         guard item.needsTheWindow else {
             model.perform(item.action)
             return

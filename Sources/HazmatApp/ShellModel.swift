@@ -750,7 +750,6 @@ final class ShellModel {
         case .installHelper: showHelperSheet = true
         case .repairHelper: repairHelper()
         case .revealHostsFile: revealHostsFile()
-        case .openSettings: break  // the Settings scene's own command opens it
         case .toggleSidebar: sidebarVisible.toggle()
         case .search: focusSearch()
         case .showHelp: showHelperSheet = true
