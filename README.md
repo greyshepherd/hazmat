@@ -23,6 +23,17 @@ Apple Silicon.
 
 **Disclaimer**: This codebase was built entirely by pairing with an AI agent — no code was handwritten by a human.
 
+## Installing
+
+```
+brew tap greyshepherd/tap
+brew trust greyshepherd/tap
+brew install --cask hazmat
+```
+On first apply, Hazmat offers to install its helper — the one step that needs
+your password, and the only thing that gives it permission to write
+`/etc/hosts`.
+
 ## Features
 
 - **Profiles and fragments.** A profile is an ordered list of fragments —
@@ -63,7 +74,6 @@ restores the rest of the file exactly as it was.
 | [BUILDING.md](BUILDING.md) | Build and test from source |
 | [RELEASE.md](RELEASE.md) | Cutting and publishing a release (maintainers) |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Reporting bugs and sending changes |
-| [LICENSE](LICENSE) | MIT |
 
 ## License
 
