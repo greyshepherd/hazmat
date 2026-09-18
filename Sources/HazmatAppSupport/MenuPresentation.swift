@@ -169,8 +169,9 @@ public struct MenuPresentation: Equatable, Sendable {
     }
 
     /// Names the state rather than a remembered profile: a remembered name lies
-    /// as soon as another tool edits the file.
-    private static func title(for reading: ActiveProfileReading) -> String {
+    /// as soon as another tool edits the file. Public so the mark can read out
+    /// the state without building the menu around it.
+    public static func title(for reading: ActiveProfileReading) -> String {
         switch reading {
         case .missingStore:
             return "Hazmat: no store"

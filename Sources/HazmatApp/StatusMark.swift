@@ -10,9 +10,17 @@ struct StatusMark: View {
     let model: ShellModel
 
     var body: some View {
-        if let mark = MenuMark.image {
-            Image(nsImage: mark)
-                .accessibilityLabel(model.menu.statusTitle)
+        mark.accessibilityLabel(MenuPresentation.title(for: model.reading))
+    }
+
+    /// The bundle's mark, or a system glyph when there is no bundle to carry
+    /// one, so the item is never an invisible target.
+    @ViewBuilder
+    private var mark: some View {
+        if let image = MenuMark.image {
+            Image(nsImage: image)
+        } else {
+            Image(systemName: "shield.lefthalf.filled")
         }
     }
 }

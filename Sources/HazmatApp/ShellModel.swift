@@ -50,6 +50,31 @@ enum NameEntry: Equatable, Sendable {
     }
 }
 
+/// A deletion the window is asking about. The store keeps no history, so a
+/// deleted file is gone; the confirmation names what goes with it.
+enum DeleteRequest: Equatable, Sendable {
+    case profile(ProfileID)
+    case fragment(FragmentID)
+
+    var title: String {
+        switch self {
+        case .profile(let profile): return "Delete the profile '\(profile)'?"
+        case .fragment(let fragment): return "Delete the fragment '\(fragment)'?"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .profile:
+            return "The profile is removed from the store. A block it wrote stays in the hosts file and is reported as drift until another profile is applied or the block is removed."
+        case .fragment:
+            return "The fragment is removed from the store. A profile that stacks it no longer resolves until the layer is removed from it."
+        }
+    }
+
+    var confirmTitle: String { "Delete" }
+}
+
 /// The shell's state: the helper, the store's reading for the menu, and the
 /// editor's last read. Decisions live in app support; this holds what was read,
 /// what the window is looking at, and forwards choices.
@@ -85,6 +110,8 @@ final class ShellModel {
     var confirmation: WriteRequest?
     /// A name the window is asking for.
     var nameEntry: NameEntry?
+    /// A deletion waiting for the window's confirmation.
+    var deletion: DeleteRequest?
     var nameDraft = ""
     var showHelperSheet = false
     var sidebarVisible = true
@@ -109,6 +136,12 @@ final class ShellModel {
     /// Set once on the main actor and read only in `deinit`, which the actor
     /// isolation cannot see into.
     @ObservationIgnored private nonisolated(unsafe) var dockObserver: (any NSObjectProtocol)?
+    /// Sees a window become key, which is when an action asked for while the
+    /// window was closed has somewhere to present itself.
+    @ObservationIgnored private nonisolated(unsafe) var keyWindowObserver: (any NSObjectProtocol)?
+    /// An action asked for while the window was closed, kept until a window is
+    /// there to present what it asks for.
+    private var actionAwaitingTheWindow: WindowAction?
     /// The monitor that answers the window's own keystrokes, held for the same
     /// reason, so it can be removed when the model goes away.
     @ObservationIgnored private nonisolated(unsafe) var shortcutMonitor: Any?
@@ -154,16 +187,27 @@ final class ShellModel {
         helper = registration.state
         selection = editor.selection
         adoptFragmentDraft(editor)
-        // Nothing is claimed before it is asked. The first check runs here, so a
-        // window opened against a helper that cannot be started says so at once
-        // instead of claiming writes are ready for as long as the check takes.
-        checkPresenceNow()
+        // The first check is asked for here, off the main actor: a helper that
+        // answers does so in milliseconds, and one that cannot be started keeps
+        // the registration's own word for the seconds its bound takes rather
+        // than holding the first frame back for them.
+        checkPresence(forced: true)
         dockObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { [weak self] note in
             let closing = (note.object as? NSWindow).map(ObjectIdentifier.init)
             MainActor.assumeIsolated {
                 self?.matchDockPresenceToTheWindows(ignoring: closing)
+            }
+        }
+        keyWindowObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didBecomeKeyNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            // The window that became key is the key window; asking the
+            // application keeps the notification's object on its own side.
+            MainActor.assumeIsolated {
+                guard NSApp.keyWindow?.level == .normal else { return }
+                self?.performTheActionAwaitingTheWindow()
             }
         }
         // A local monitor sees a keystroke before it is dispatched, which is what
@@ -185,6 +229,23 @@ final class ShellModel {
     /// The window the shell is shown in, told by the scene that renders it.
     func windowChanged(_ window: NSWindow?) {
         shellWindow = window
+    }
+
+    /// Performs an action that presents something, once there is a window to
+    /// present it in. A window that is already showing gets it now; otherwise
+    /// the caller opens the window and the action follows when it becomes key.
+    func performOnceTheWindowShows(_ action: WindowAction) {
+        if let shellWindow, shellWindow.isVisible {
+            perform(action)
+        } else {
+            actionAwaitingTheWindow = action
+        }
+    }
+
+    private func performTheActionAwaitingTheWindow() {
+        guard let action = actionAwaitingTheWindow else { return }
+        actionAwaitingTheWindow = nil
+        perform(action)
     }
 
     /// Answers a keystroke the window binds without a menu bar item, and reports
@@ -317,15 +378,6 @@ final class ShellModel {
         return registration.state.refined(by: lastAnswer.answer)
     }
 
-    /// Asks once, on the calling thread, and records the answer. Bounded by the
-    /// client's own bound, so this waits no longer than that.
-    @discardableResult
-    private func checkPresenceNow() -> HelperReachability {
-        let answer = presence.check()
-        record(answer)
-        return answer
-    }
-
     /// Records what a check found, and reports whether it changed the state.
     /// Nothing is decided here: the state follows from the answer the same way it
     /// follows from the registration.
@@ -422,14 +474,29 @@ final class ShellModel {
         makeHelperAnswer(working: "Installing the helper…")
     }
 
+    /// Removes the registration, away from the main thread: the system takes its
+    /// time over it, the same as it does over a registration.
     func unregister() {
-        do {
-            try registration.unregister()
-            notice = .success("Unregistered.")
-        } catch {
-            notice = .failure("\(error)")
+        guard !repairInFlight else { return }
+        repairInFlight = true
+        notice = .progress("Unregistering the helper…")
+        let registration = registration
+        Task.detached {
+            let failure: RegistrationFailure?
+            do {
+                try registration.unregister()
+                failure = nil
+            } catch let refusal as RegistrationFailure {
+                failure = refusal
+            } catch {
+                failure = .other(domain: "\(type(of: error))", code: 0, message: "\(error)")
+            }
+            await MainActor.run {
+                self.repairInFlight = false
+                self.notice = failure.map { .failure("\($0)") } ?? .success("Unregistered.")
+                self.refresh()
+            }
         }
-        refresh()
     }
 
     /// Repairs the helper: the same sequence, named for what the user sees, so
@@ -548,13 +615,11 @@ final class ShellModel {
         finish(session.editor.duplicate(fragment: fragment, as: name))
     }
 
-    func deleteProfile() {
-        guard let profile = selectedProfile else { return }
+    func deleteProfile(_ profile: ProfileID) {
         finish(session.editor.delete(profile: profile))
     }
 
-    func deleteFragment() {
-        guard let fragment = selectedFragment else { return }
+    func deleteFragment(_ fragment: FragmentID) {
         finish(session.editor.delete(fragment: fragment))
     }
 
@@ -568,7 +633,10 @@ final class ShellModel {
     /// re-apply.
     func saveFragment(text: String) {
         guard let fragment = selectedFragment else { return }
-        finish(session.editor.save(fragment: fragment, text: text, editing: selectedProfile, previous: editor))
+        let profile = selectedProfile
+        edit(working: "Saving \(fragment)…") { editor, previous in
+            editor.save(fragment: fragment, text: text, editing: profile, previous: previous)
+        }
     }
 
     func saveFragmentDraft() {
@@ -578,17 +646,44 @@ final class ShellModel {
 
     func addLayer(_ fragment: FragmentID) {
         guard let profile = selectedProfile else { return }
-        finish(session.editor.addLayer(fragment, to: profile, previous: editor))
+        edit(working: "Adding \(fragment)…") { editor, previous in
+            editor.addLayer(fragment, to: profile, previous: previous)
+        }
     }
 
     func removeLayer(at index: Int) {
         guard let profile = selectedProfile else { return }
-        finish(session.editor.removeLayer(at: index, from: profile, previous: editor))
+        edit(working: "Removing the layer…") { editor, previous in
+            editor.removeLayer(at: index, from: profile, previous: previous)
+        }
     }
 
     func moveLayer(from index: Int, to destination: Int) {
         guard let profile = selectedProfile else { return }
-        finish(session.editor.moveLayer(from: index, to: destination, in: profile, previous: editor))
+        edit(working: "Reordering the layers…") { editor, previous in
+            editor.moveLayer(from: index, to: destination, in: profile, previous: previous)
+        }
+    }
+
+    /// An edit that can reach the live file: when the edited profile's block is
+    /// live, the store write is followed by a privileged write, which is a round
+    /// trip to the helper and takes its whole bound when nothing answers. It
+    /// runs away from the main thread, like an apply, and one at a time: a
+    /// second edit asked for while one is in flight would plan from a
+    /// presentation the first is about to change.
+    private func edit(
+        working: String,
+        _ body: @escaping @Sendable (EditorModel, EditorPresentation) -> EditorOutcome
+    ) {
+        guard !busy else { return }
+        let editorModel = session.editor
+        let previous = editor
+        busy = true
+        notice = .progress(working)
+        Task.detached {
+            let outcome = body(editorModel, previous)
+            await MainActor.run { self.finish(outcome) }
+        }
     }
 
     /// Reorders by the destination the list reports, which counts the row before
@@ -604,16 +699,18 @@ final class ShellModel {
         nameDraft = entry.suggested
     }
 
-    func beginRename() {
-        switch editor.selection {
+    /// Renames the item the sidebar shows selected, or the one a row's own menu
+    /// names: a row's menu opens without selecting the row, so it says which.
+    func beginRename(_ item: SidebarSelection? = nil) {
+        switch item ?? editor.selection {
         case .profile(let profile): beginNameEntry(.renameProfile(profile))
         case .fragment(let fragment): beginNameEntry(.renameFragment(fragment))
         case nil: break
         }
     }
 
-    func beginDuplicate() {
-        switch editor.selection {
+    func beginDuplicate(_ item: SidebarSelection? = nil) {
+        switch item ?? editor.selection {
         case .profile(let profile): beginNameEntry(.duplicateProfile(profile))
         case .fragment(let fragment): beginNameEntry(.duplicateFragment(fragment))
         case nil: break
@@ -644,11 +741,30 @@ final class ShellModel {
         nameDraft = ""
     }
 
-    func deleteSelected() {
-        switch editor.selection {
-        case .profile: deleteProfile()
-        case .fragment: deleteFragment()
+    // MARK: - Deleting
+
+    /// Asks before deleting: the store keeps no history, so this is the one
+    /// step that cannot be undone. Names the row's own item when a row's menu
+    /// asks, the selection otherwise.
+    func requestDelete(_ item: SidebarSelection? = nil) {
+        switch item ?? editor.selection {
+        case .profile(let profile): deletion = .profile(profile)
+        case .fragment(let fragment): deletion = .fragment(fragment)
         case nil: break
+        }
+    }
+
+    func cancelDelete() {
+        deletion = nil
+    }
+
+    /// Performs the confirmed deletion.
+    func confirmDelete() {
+        guard let request = deletion else { return }
+        deletion = nil
+        switch request {
+        case .profile(let profile): deleteProfile(profile)
+        case .fragment(let fragment): deleteFragment(fragment)
         }
     }
 
@@ -735,6 +851,10 @@ final class ShellModel {
     }
 
     private func apply(_ profile: ProfileID, replacing replacement: Replacement) {
+        // One write at a time: a second apply would plan from the bytes the
+        // first is replacing, and the helper would refuse it as a stale baseline
+        // at best.
+        guard !busy else { return }
         let editorModel = session.editor
         busy = true
         notice = .progress("Applying \(profile)…")
@@ -807,7 +927,7 @@ final class ShellModel {
         case .reload: refresh()
         case .rename: beginRename()
         case .duplicate: beginDuplicate()
-        case .delete: deleteSelected()
+        case .delete: requestDelete()
         case .save: saveFragmentDraft()
         case .installHelper: showHelperSheet = true
         case .repairHelper: repairHelper()
@@ -838,7 +958,9 @@ final class ShellModel {
     }
 
     private func finish(_ outcome: EditorOutcome) {
+        busy = false
         notice = MenuNotice(outcome)
+        if let apply = outcome.apply { followUp(on: apply) }
         refresh()
     }
 
@@ -848,7 +970,7 @@ final class ShellModel {
     /// the Dock and the application switcher, and comes forward.
     func windowOpened() {
         NSApp.setActivationPolicy(.regular)
-        NSApp.activate(ignoringOtherApps: true)
+        NSApp.activate()
     }
 
     /// With no window on screen the application lives in the menu bar alone:
@@ -868,6 +990,9 @@ final class ShellModel {
         }
         if let dockObserver {
             NotificationCenter.default.removeObserver(dockObserver)
+        }
+        if let keyWindowObserver {
+            NotificationCenter.default.removeObserver(keyWindowObserver)
         }
     }
 }

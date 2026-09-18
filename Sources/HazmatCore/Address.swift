@@ -1,3 +1,5 @@
+import Foundation
+
 /// The address families a host entry can carry. A name resolving in both is a
 /// union, not a conflict.
 public enum AddressFamily: String, CaseIterable, Hashable, Sendable {

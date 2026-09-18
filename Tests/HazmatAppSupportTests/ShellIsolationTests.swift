@@ -195,7 +195,7 @@ final class ShellIsolationTests: XCTestCase {
         }
 
         let mark = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
-        XCTAssertTrue(mark.contains("accessibilityLabel(model.menu.statusTitle)"), mark)
+        XCTAssertTrue(mark.contains("accessibilityLabel(MenuPresentation.title(for: model.reading))"), mark)
         XCTAssertNil(mark.range(of: "Text("), "the bar carries the mark alone: \(mark)")
     }
 
@@ -220,7 +220,7 @@ final class ShellIsolationTests: XCTestCase {
         let label = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
         XCTAssertFalse(label.isEmpty, "the status item's mark is missing")
         XCTAssertTrue(
-            label.contains("accessibilityLabel(model.menu.statusTitle)"),
+            label.contains("accessibilityLabel(MenuPresentation.title(for: model.reading))"),
             "the mark carries the state, so it must name it: \(label)"
         )
 
@@ -272,9 +272,12 @@ final class ShellIsolationTests: XCTestCase {
 
         let sidebar = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "SidebarView.swift" }?.1 ?? ""
         XCTAssertTrue(sidebar.contains("contextMenu"), sidebar)
-        XCTAssertTrue(sidebar.contains("model.beginRename()"), sidebar)
-        XCTAssertTrue(sidebar.contains("model.beginDuplicate()"), sidebar)
-        XCTAssertTrue(sidebar.contains("model.deleteSelected()"), sidebar)
+        // A row's menu opens without selecting the row, so each item names the
+        // row it was opened on rather than the selection.
+        XCTAssertTrue(sidebar.contains("model.beginRename(row)"), sidebar)
+        XCTAssertTrue(sidebar.contains("model.beginDuplicate(row)"), sidebar)
+        XCTAssertTrue(sidebar.contains("model.requestDelete(row)"), sidebar)
+        XCTAssertNil(sidebar.range(of: "deleteSelected()"), "a row's menu must not act on the selection: \(sidebar)")
 
         // The restore is offered beside the write state, and the drift overwrite
         // for the block the reading found.

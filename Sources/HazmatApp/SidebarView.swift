@@ -83,16 +83,18 @@ struct SidebarView: View {
         }
     }
 
+    /// A row's own menu acts on that row, not on the selection: opening it does
+    /// not select the row, so each item names the row it was opened on.
     @ViewBuilder
-    private func contextMenu(for selection: SidebarSelection) -> some View {
-        Button(WindowAction.rename.title + "…") { model.beginRename() }
-        Button(WindowAction.duplicate.title + "…") { model.beginDuplicate() }
-        if case .fragment(let fragment) = selection, let profile = model.editor.selectedProfile {
+    private func contextMenu(for row: SidebarSelection) -> some View {
+        Button(WindowAction.rename.title + "…") { model.beginRename(row) }
+        Button(WindowAction.duplicate.title + "…") { model.beginDuplicate(row) }
+        if case .fragment(let fragment) = row, let profile = model.editor.selectedProfile {
             Divider()
             Button("Add to \(profile.rawValue)") { model.addLayer(fragment) }
         }
         Divider()
-        Button(WindowAction.delete.title, role: .destructive) { model.deleteSelected() }
+        Button(WindowAction.delete.title + "…", role: .destructive) { model.requestDelete(row) }
     }
 
     /// The helper as a glyph, a word and a colour, with the action that resolves

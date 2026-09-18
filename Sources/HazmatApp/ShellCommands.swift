@@ -56,11 +56,8 @@ struct ShellCommands: Commands {
             model.perform(item.action)
             return
         }
+        model.performOnceTheWindowShows(item.action)
         openWindow(id: HazmatApp.windowID)
-        Task { @MainActor in
-            try? await Task.sleep(for: .milliseconds(250))
-            model.perform(item.action)
-        }
     }
 
     private func shortcut(_ shortcut: CommandPresentation.Shortcut) -> KeyboardShortcut {
