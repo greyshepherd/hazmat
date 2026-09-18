@@ -142,8 +142,9 @@ fi
 CHANGELOG="$ROOT/CHANGELOG.md"
 NOTES_FILE=""
 PUBLISHED_FEED=""
+SERVED_ARCHIVE=""
 remove_temporary_files() {
-    rm -f "${NOTES_FILE:-}" "${PUBLISHED_FEED:-}"
+    rm -f "${NOTES_FILE:-}" "${PUBLISHED_FEED:-}" "${SERVED_ARCHIVE:-}"
 }
 trap remove_temporary_files EXIT
 
@@ -267,13 +268,9 @@ if gh release view "$TAG" --repo "$RELEASE_REPO" > /dev/null 2>&1; then
     # this is not a refusal is that it already carries these exact bytes — which is
     # what a run that stopped after uploading and before the feed leaves behind.
     # Refusing there would make the feed impossible to write without cutting a
-    # version nobody asked for.
-    published_digest="$(curl --silent --location "$ARCHIVE_URL" | shasum -a 256 | awk '{print $1}')"
-    [ -n "$published_digest" ] \
-        || fail "release $TAG exists but its archive does not answer at $ARCHIVE_URL"
-    [ "$published_digest" = "$local_digest" ] \
-        || fail "release $TAG already carries a different archive; a published archive is never replaced, so publish a higher build number"
-    echo "   $TAG already carries this archive, so only the feed is left to write"
+    # version nobody asked for. Which bytes it carries is decided below, where a
+    # resumed publish and a fresh one are read the same way.
+    echo "   $TAG is published already; the archive it serves is checked next"
 else
     # `--verify-tag` is what keeps the tag this step made: without it the host
     # would create its own at the default branch's head.
@@ -285,11 +282,19 @@ else
         || fail "the release could not be created"
 fi
 
-# MARK: - The archive is readable before the feed names it
+# MARK: - The archive that answers is the one that was built
 
+# The host accepting an upload is not the same as the bytes it serves being the
+# bytes built here, so the served copy is hashed rather than only asked for. An
+# upload that did not arrive whole is refused before the feed can name it.
 step "checking the archive at its address"
-readable="$(curl --silent --location --head --output /dev/null --write-out '%{http_code}' "$ARCHIVE_URL")"
-[ "$readable" = "200" ] || fail "the archive does not answer at $ARCHIVE_URL (HTTP $readable)"
+SERVED_ARCHIVE="$(mktemp)"
+served_status="$(curl --silent --location --output "$SERVED_ARCHIVE" --write-out '%{http_code}' "$ARCHIVE_URL")"
+[ "$served_status" = "200" ] || fail "the archive does not answer at $ARCHIVE_URL (HTTP $served_status)"
+served_digest="$(shasum -a 256 "$SERVED_ARCHIVE" | awk '{print $1}')"
+[ "$served_digest" = "$local_digest" ] \
+    || fail "the archive at $ARCHIVE_URL is not the one this run built (published $served_digest, built $local_digest); a published archive is never replaced, so publish a higher build number"
+echo "   the archive answers with the bytes built here"
 
 # MARK: - The feed entry
 
