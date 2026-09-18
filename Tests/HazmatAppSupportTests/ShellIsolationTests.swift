@@ -178,7 +178,8 @@ final class ShellIsolationTests: XCTestCase {
         }
 
         let mark = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
-        XCTAssertTrue(mark.contains("Text(model.menu.statusTitle)"), mark)
+        XCTAssertTrue(mark.contains("accessibilityLabel(model.menu.statusTitle)"), mark)
+        XCTAssertNil(mark.range(of: "Text("), "the bar carries the mark alone: \(mark)")
     }
 
     /// The menu bar scene renders the presentation; it does not name labels,

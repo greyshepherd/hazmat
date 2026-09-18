@@ -21,7 +21,7 @@ struct StatusRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
                 if !model.notice.isEmpty {
-                    Text(model.notice)
+                    Text(model.notice.text)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(2)

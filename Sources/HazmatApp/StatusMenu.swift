@@ -11,6 +11,7 @@ import SwiftUI
 /// is opened.
 struct StatusMenu: View {
     let model: ShellModel
+    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let menu = model.menu
@@ -42,6 +43,7 @@ struct StatusMenu: View {
                     Text(item.title)
                 }
             }
+            .keyboardShortcut(item.shortcut.map(shortcut))
         } else {
             Text(item.title)
         }
@@ -59,6 +61,20 @@ struct StatusMenu: View {
             model.register()
         case .repairHelper:
             model.repairHelper()
+        case .openWindow:
+            model.windowOpened()
+            openWindow(id: HazmatApp.windowID)
+        case .quit:
+            NSApp.terminate(nil)
         }
+    }
+
+    private func shortcut(_ shortcut: CommandPresentation.Shortcut) -> KeyboardShortcut {
+        var modifiers = EventModifiers()
+        if shortcut.modifiers.contains(.command) { modifiers.insert(.command) }
+        if shortcut.modifiers.contains(.shift) { modifiers.insert(.shift) }
+        if shortcut.modifiers.contains(.option) { modifiers.insert(.option) }
+        if shortcut.modifiers.contains(.control) { modifiers.insert(.control) }
+        return KeyboardShortcut(KeyEquivalent(shortcut.key.first ?? "q"), modifiers: modifiers)
     }
 }

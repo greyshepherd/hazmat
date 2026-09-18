@@ -1,9 +1,9 @@
 import Foundation
 import HazmatCore
 
-/// The status item's title and menu. Built from what was read, the helper's
-/// state, and the last outcome, so the scene renders decisions instead of
-/// making them.
+/// The menu, and the name the status item reads out: built from what was read,
+/// the helper's state, and the last outcome, so the scenes render decisions
+/// instead of making them.
 public struct MenuPresentation: Equatable, Sendable {
     /// What choosing an item asks the model to do.
     public enum Action: Equatable, Sendable {
@@ -16,6 +16,10 @@ public struct MenuPresentation: Equatable, Sendable {
         case registerHelper
         /// Remove the registration and register the helper again.
         case repairHelper
+        /// Bring the main window forward.
+        case openWindow
+        /// End the application.
+        case quit
     }
 
     public struct Item: Equatable, Sendable, Identifiable {
@@ -24,6 +28,22 @@ public struct MenuPresentation: Equatable, Sendable {
         /// `nil` for a line: it reports and is not selectable.
         public let action: Action?
         public let isMarked: Bool
+        /// The keystroke the item carries in the menu, when it has one.
+        public let shortcut: CommandPresentation.Shortcut?
+
+        public init(
+            id: String,
+            title: String,
+            action: Action?,
+            isMarked: Bool,
+            shortcut: CommandPresentation.Shortcut? = nil
+        ) {
+            self.id = id
+            self.title = title
+            self.action = action
+            self.isMarked = isMarked
+            self.shortcut = shortcut
+        }
 
         public var isSelectable: Bool { action != nil }
     }
@@ -36,12 +56,18 @@ public struct MenuPresentation: Equatable, Sendable {
     public let statusTitle: String
     public let sections: [Section]
 
-    public init(reading: ActiveProfileReading, helper: HelperState, notice: String) {
+    public init(reading: ActiveProfileReading, helper: HelperState, notice: MenuNotice) {
         var items = ItemBuilder()
 
-        var status: [Item] = [items.line(helper.summary)]
-        if !notice.isEmpty {
-            status.append(items.line(notice))
+        // What needs attention, and nothing else: a healthy helper, an applied
+        // block, a state the marks already carry, and a successful write are
+        // all silent. A quiet menu means everything is as the items say.
+        var status: [Item] = []
+        if helper != .enabled {
+            status.append(items.line(helper.summary))
+        }
+        if case .failure(let text) = notice {
+            status.append(items.line(text))
         }
         if let activation = reading.activation {
             for problem in activation.problems {
@@ -59,14 +85,12 @@ public struct MenuPresentation: Equatable, Sendable {
             status.append(items.line("The live file could not be read: \(reason)"))
         case .derived(_, let activation):
             switch activation.state {
-            case .off:
-                status.append(items.line("No block is applied."))
+            case .off, .active:
+                break
             case .unreadable(let error):
                 status.append(items.line("The live file's markers cannot be read: \(error)"))
             case .drifted:
                 status.append(items.line("The live block matches no profile, so switching is refused."))
-            case .active(let profiles):
-                status.append(items.line("Active: \(profiles.map(\.rawValue).joined(separator: ", "))"))
             }
         }
 
@@ -87,7 +111,10 @@ public struct MenuPresentation: Equatable, Sendable {
             }
         }
 
-        var sections: [Section] = [Section(id: "status", items: status)]
+        var sections: [Section] = []
+        if !status.isEmpty {
+            sections.append(Section(id: "status", items: status))
+        }
         if !profiles.isEmpty {
             sections.append(Section(id: "profiles", items: profiles))
         }
@@ -111,6 +138,15 @@ public struct MenuPresentation: Equatable, Sendable {
                 )
             )
         }
+        sections.append(
+            Section(
+                id: "app",
+                items: [
+                    items.item("Open Hazmat", .openWindow),
+                    items.item("Quit Hazmat", .quit, shortcut: CommandPresentation.Shortcut("q", .command)),
+                ]
+            )
+        )
 
         statusTitle = Self.title(for: reading)
         self.sections = sections
@@ -153,9 +189,10 @@ private struct ItemBuilder {
     mutating func item(
         _ title: String,
         _ action: MenuPresentation.Action,
-        marked: Bool = false
+        marked: Bool = false,
+        shortcut: CommandPresentation.Shortcut? = nil
     ) -> MenuPresentation.Item {
         counter += 1
-        return MenuPresentation.Item(id: "item:\(counter)", title: title, action: action, isMarked: marked)
+        return MenuPresentation.Item(id: "item:\(counter)", title: title, action: action, isMarked: marked, shortcut: shortcut)
     }
 }

@@ -28,6 +28,19 @@ public struct EditorOutcome: Equatable, Sendable {
         return write.didChange
     }
 
+    /// Whether something went wrong: the store refused, the applier refused or
+    /// failed, or a check refused before either was touched.
+    public var needsAttention: Bool {
+        if case .failure = store { return true }
+        if let apply {
+            switch apply {
+            case .refused, .failed: return true
+            case .nothingToDo, .applied: break
+            }
+        }
+        return problem != nil
+    }
+
     public var description: String {
         var parts: [String] = []
         switch store {

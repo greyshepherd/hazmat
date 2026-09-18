@@ -36,7 +36,7 @@ final class MenuPresentationTests: XCTestCase {
         actions(menu).filter { action in
             switch action {
             case .activate, .overwriteDrift: return true
-            case .turnOff, .registerHelper, .repairHelper: return false
+            case .turnOff, .registerHelper, .repairHelper, .openWindow, .quit: return false
             }
         }
     }
@@ -51,7 +51,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([work], .active([work])),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: work")
@@ -62,14 +62,14 @@ final class MenuPresentationTests: XCTestCase {
         XCTAssertNil(section(menu, "overwrite"))
         XCTAssertEqual(menuItem(menu, titled: "Turn Hazmat Off")?.action, .turnOff)
         XCTAssertNil(section(menu, "helper"), "an enabled helper needs no registration")
-        XCTAssertTrue(lines(menu).contains(where: { $0.contains("Active: work") }), lines(menu).description)
+        XCTAssertTrue(lines(menu).isEmpty, "a healthy state says nothing: \(lines(menu).description)")
     }
 
     func testSeveralMatchesAreAllNamedAndMarked() {
         let menu = MenuPresentation(
             reading: derived([ads, work], .active([ads, work])),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: ads, work")
@@ -84,7 +84,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([work], .off),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: off")
@@ -98,7 +98,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([ads, work], .drifted(liveBlock: block)),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: drift")
@@ -118,7 +118,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([work], .unreadable(.multipleBlocks(firstLine: 1, secondLine: 3))),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: markers refused")
@@ -130,7 +130,7 @@ final class MenuPresentationTests: XCTestCase {
     }
 
     func testAMissingStoreSaysSoAndOffersNoActivation() {
-        let menu = MenuPresentation(reading: .missingStore, helper: .enabled, notice: "")
+        let menu = MenuPresentation(reading: .missingStore, helper: .enabled, notice: .quiet)
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: no store")
         XCTAssertTrue(lines(menu).contains(where: { $0.contains("No store") }), lines(menu).description)
@@ -140,7 +140,7 @@ final class MenuPresentationTests: XCTestCase {
     }
 
     func testAnEmptyStoreSaysSoAndOffersNoActivation() {
-        let menu = MenuPresentation(reading: .emptyStore, helper: .enabled, notice: "")
+        let menu = MenuPresentation(reading: .emptyStore, helper: .enabled, notice: .quiet)
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: no profiles")
         XCTAssertTrue(lines(menu).contains("The store holds no profiles."), lines(menu).description)
@@ -152,7 +152,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: .unreadableFile(profiles: [work], reason: "no such file"),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: unreadable")
@@ -166,7 +166,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([work], .active([work])),
             helper: .notRegistered,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertTrue(lines(menu).contains(HelperState.notRegistered.summary), lines(menu).description)
@@ -178,7 +178,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([work], .active([work])),
             helper: .awaitingApproval,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertTrue(lines(menu).contains(HelperState.awaitingApproval.summary), lines(menu).description)
@@ -189,7 +189,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([work], .active([work])),
             helper: .notAnswering,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertTrue(lines(menu).contains(HelperState.notAnswering.summary), lines(menu).description)
@@ -203,7 +203,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([broken, work], .active([work]), problems: [problem]),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menu.statusTitle, "Hazmat: work")
@@ -215,14 +215,48 @@ final class MenuPresentationTests: XCTestCase {
         XCTAssertNil(menuItem(menu, titled: "broken"))
     }
 
-    func testTheLastOutcomeIsReportedInTheMenu() {
+    func testASuccessfulOutcomeIsNotReported() {
         let menu = MenuPresentation(
             reading: derived([work], .active([work])),
             helper: .enabled,
-            notice: "applied: drift was overwritten"
+            notice: .success("applied: the block was replaced")
         )
 
-        XCTAssertTrue(lines(menu).contains("applied: drift was overwritten"), lines(menu).description)
+        XCTAssertTrue(lines(menu).isEmpty, lines(menu).description)
+    }
+
+    func testAFailedOutcomeIsReported() {
+        let menu = MenuPresentation(
+            reading: derived([work], .active([work])),
+            helper: .enabled,
+            notice: .failure("refused: the helper refused the bytes")
+        )
+
+        XCTAssertTrue(
+            lines(menu).contains("refused: the helper refused the bytes"),
+            lines(menu).description
+        )
+    }
+
+    func testAnEnabledHelperIsSilent() {
+        let menu = MenuPresentation(
+            reading: derived([work], .active([work])),
+            helper: .enabled,
+            notice: .quiet
+        )
+
+        XCTAssertNil(section(menu, "status"), lines(menu).description)
+    }
+
+    func testTheMenuOffersOpeningTheWindowAndQuitting() {
+        let menu = MenuPresentation(
+            reading: derived([work], .active([work])),
+            helper: .enabled,
+            notice: .quiet
+        )
+
+        XCTAssertEqual(menuItem(menu, titled: "Open Hazmat")?.action, .openWindow)
+        XCTAssertEqual(menuItem(menu, titled: "Quit Hazmat")?.action, .quit)
     }
 
     // MARK: - 3.3 Overwrites are deliberate and labelled
@@ -232,7 +266,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([ads, work], .drifted(liveBlock: block)),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         let overwrites = menu.sections.flatMap(\.items).compactMap { item -> (String, ProfileID)? in
@@ -255,7 +289,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([ads, work], .drifted(liveBlock: block)),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertEqual(menuItem(menu, titled: "Overwrite drift with 'work'")?.action, .overwriteDrift(work, liveBlock: block))
@@ -270,7 +304,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([ads, work], .drifted(liveBlock: block)),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         let bare = section(menu, "profiles")?.items ?? []
@@ -286,7 +320,7 @@ final class MenuPresentationTests: XCTestCase {
         let menu = MenuPresentation(
             reading: derived([ads, work], .active([work])),
             helper: .enabled,
-            notice: ""
+            notice: .quiet
         )
 
         XCTAssertNil(section(menu, "overwrite"))

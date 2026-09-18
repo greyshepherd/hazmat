@@ -18,23 +18,41 @@ visible.
 - **WHEN** the application runs with its window closed and a profile is activated from the menu bar
 - **THEN** the profile is applied
 
-### Requirement: The title names the state, not a remembered profile
+### Requirement: With the window closed the application lives in the menu bar
 
-The status item's title MUST name the active profile when one is active, MUST
-report drift when the live block matches no profile, and MUST report that the
-file is off when it holds no block.
+Closing the window removes the application from the Dock and the application
+switcher, the way menu-bar applications behave; the status item remains.
+Opening a window puts the application back in both. The menu MUST offer opening
+the window and quitting the application.
+
+#### Scenario: The window closes
+- **WHEN** the main window closes
+- **THEN** the application is in neither the Dock nor the application switcher, and the status item remains
+
+#### Scenario: The window opens again
+- **WHEN** Open Hazmat is chosen from the menu
+- **THEN** the window opens and the application is in the Dock and the application switcher again
+
+### Requirement: The state is named from the reading, not remembered
+
+The status item presents the mark and no text. The menu MUST mark the active
+profile or profiles, MUST report drift when the live block matches no profile,
+and the item's accessibility label MUST name the state, so reading the menu bar
+still names what is live. What needs no attention says nothing: an applied
+block, a file that is off, a healthy helper, and a successful write are all
+silent.
 
 #### Scenario: A profile is active
 - **WHEN** a profile is active
-- **THEN** the title names that profile
+- **THEN** the menu marks that profile and adds no line of its own
 
 #### Scenario: Drift
 - **WHEN** the live block matches no profile
-- **THEN** the title reports drift rather than naming a profile
+- **THEN** the menu reports drift rather than naming a profile
 
 #### Scenario: No block
 - **WHEN** the live file holds no block
-- **THEN** the title reports that Hazmat is off
+- **THEN** no profile is marked and the menu adds no line
 
 ### Requirement: The menu lists the store's profiles as they are now
 
@@ -58,18 +76,19 @@ the write, atomic replacement, and a reported outcome.
 
 #### Scenario: Nothing to do
 - **WHEN** the active profile is activated again
-- **THEN** the outcome reports that nothing needed to change
+- **THEN** nothing is written and the menu reports nothing
 
 #### Scenario: Outcome is visible
-- **WHEN** an activation changes the file
-- **THEN** the menu reports that the file was changed
+- **WHEN** an activation fails
+- **THEN** the menu reports what went wrong
 
-### Requirement: Helper state is visible and a refused switch is explained
+### Requirement: A helper that needs attention is visible, and a refused switch is explained
 
-The menu MUST report whether the privileged helper is not registered, awaiting
-approval, or enabled, MUST offer registration when it is not enabled, and an
-activation that the privileged side refuses MUST be reported with its reason and
-MUST leave the file unchanged.
+The menu MUST report a helper that needs attention — not registered, awaiting
+approval, or not answering — MUST offer registration when it is not enabled,
+and an activation that the privileged side refuses MUST be reported with its
+reason and MUST leave the file unchanged. An enabled helper is reported
+nowhere.
 
 #### Scenario: No approved helper
 - **WHEN** a profile is activated while the helper is not approved
@@ -78,6 +97,10 @@ MUST leave the file unchanged.
 #### Scenario: Registration offered
 - **WHEN** the helper is not registered
 - **THEN** the menu offers to register it
+
+#### Scenario: An enabled helper
+- **WHEN** the helper is registered, approved, and answering
+- **THEN** the menu reports nothing about it
 
 ### Requirement: Drift is never overwritten silently
 
