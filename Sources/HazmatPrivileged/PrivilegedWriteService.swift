@@ -10,6 +10,9 @@ public enum WriteRefusal: Equatable, Sendable, CustomStringConvertible {
     case block(BlockError)
     /// The file no longer holds the bytes the plan was based on.
     case baselineMismatch
+    /// The bytes would change something outside the managed block. The
+    /// privileged side may replace the block and nothing else, whoever asks.
+    case bytesOutsideBlockChanged
     case accessControlList(String)
 
     init(_ refusal: ByteRefusal) {
@@ -33,6 +36,8 @@ public enum WriteRefusal: Equatable, Sendable, CustomStringConvertible {
             return error.description
         case .baselineMismatch:
             return "the file changed since it was read; the write was planned from other bytes"
+        case .bytesOutsideBlockChanged:
+            return "the bytes would change the file outside the managed block"
         case .accessControlList(let detail):
             return "the file carries an access-control list: \(detail)"
         }
@@ -57,8 +62,9 @@ public enum WriteOutcome: Equatable, Sendable {
 }
 
 /// The privileged side's whole job: validate the bytes, check the file is still
-/// the one the plan was based on, and replace it atomically. It composes
-/// nothing, resolves nothing, and builds no path from a request.
+/// the one the plan was based on, check that only the block differs, and replace
+/// the file atomically. It composes nothing, resolves nothing, and builds no
+/// path from a request.
 public struct PrivilegedWriteService: Sendable {
     public let writer: AtomicFileWriter
 
@@ -70,18 +76,40 @@ public struct PrivilegedWriteService: Sendable {
         self.writer = writer
     }
 
-    /// Installs finished bytes.
+    /// Installs finished bytes. The block is the only thing a request may
+    /// change: with it taken out of both, the bytes must be the live file. That
+    /// holds here, not only on the client, so it holds for any client at all.
     public func write(bytes: Data, baselineDigest: Data) -> WriteOutcome {
         if let refusal = PlannedBytes.refusal(bytes) {
             return .refused(WriteRefusal(refusal))
         }
+        let live: Data
         switch liveFile(matching: baselineDigest) {
+        case .file(let matched):
+            live = matched
         case .outcome(let outcome):
             return outcome
-        case .file:
-            break
+        }
+        if let refusal = refusalOutsideTheBlock(planned: bytes, live: live) {
+            return .refused(refusal)
         }
         return perform { try writer.write(bytes) }
+    }
+
+    /// Why the planned bytes are refused for what they change outside the block,
+    /// or `nil` when only the block differs from the live file. A live file
+    /// whose markers cannot be read is refused on the same terms as planned
+    /// bytes that cannot be: nothing is written over it.
+    private func refusalOutsideTheBlock(planned: Data, live: Data) -> WriteRefusal? {
+        do {
+            let strippedPlanned = try BlockSplice.strip(from: planned)
+            let strippedLive = try BlockSplice.strip(from: live)
+            return strippedPlanned == strippedLive ? nil : .bytesOutsideBlockChanged
+        } catch let error as BlockError {
+            return .block(error)
+        } catch {
+            return .block(.invalidBlock("\(error)"))
+        }
     }
 
     /// Removes the managed block from the live file. The bytes are read here, so

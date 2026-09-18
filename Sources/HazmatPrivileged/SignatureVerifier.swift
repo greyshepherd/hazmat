@@ -4,21 +4,23 @@ import Security
 
 public enum SignatureError: Error, Equatable, Sendable, CustomStringConvertible {
     case requirementUnreadable(String)
-    case guestUnavailable(OSStatus)
 
     public var description: String {
         switch self {
         case .requirementUnreadable(let requirement):
             return "'\(requirement)' is not a readable code requirement"
-        case .guestUnavailable(let status):
-            return "the client's code could not be examined (\(status))"
         }
     }
 }
 
-/// Checks a client against a code requirement. Development cannot anchor to a
-/// team, because an ad-hoc signature carries none, so the requirement is the
-/// app's identifier alone; a shipping build anchors team and identifier.
+/// Builds the code requirement a client must satisfy. Development cannot anchor
+/// to a team, because an ad-hoc signature carries none, so the requirement is
+/// the app's identifier alone; a shipping build anchors team and identifier.
+///
+/// The requirement is handed to the connection, and the system checks the
+/// process behind every message against it. Nothing here looks a process up by
+/// its identifier: a process identifier can be reused, and a check made against
+/// one at accept time says nothing about who sends the next message.
 public struct SignatureVerifier: Sendable {
     public let requirement: String
 
@@ -70,13 +72,16 @@ public struct SignatureVerifier: Sendable {
         )
     }
 
-    /// Whether the process behind a connection satisfies the requirement. The
-    /// identifier comes from the connection, not from the request, so a caller
-    /// cannot name itself.
-    public func accepts(processIdentifier: pid_t) -> Bool {
-        guard let code = try? guestCode(processIdentifier: processIdentifier) else { return false }
-        return accepts(code: code)
+    /// The requirement as text the system can read, or the reason it cannot. A
+    /// connection given an unreadable requirement raises rather than refuses, so
+    /// it is read here first.
+    public func readableRequirement() throws -> String {
+        _ = try makeRequirement()
+        return requirement
     }
+
+    /// Whether `code` satisfies the requirement. What the connection's own check
+    /// decides, made callable so the requirement's meaning can be tested.
     public func accepts(code: SecCode) -> Bool {
         guard let requirement = try? makeRequirement() else { return false }
         return SecCodeCheckValidity(code, [], requirement) == errSecSuccess
@@ -89,15 +94,5 @@ public struct SignatureVerifier: Sendable {
             throw SignatureError.requirementUnreadable(self.requirement)
         }
         return requirement
-    }
-
-    private func guestCode(processIdentifier: pid_t) throws -> SecCode {
-        let attributes = [kSecGuestAttributePid: NSNumber(value: processIdentifier)] as CFDictionary
-        var code: SecCode?
-        let status = SecCodeCopyGuestWithAttributes(nil, attributes, [], &code)
-        guard status == errSecSuccess, let code else {
-            throw SignatureError.guestUnavailable(status)
-        }
-        return code
     }
 }

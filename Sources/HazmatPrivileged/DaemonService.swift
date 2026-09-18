@@ -2,10 +2,13 @@ import Foundation
 import HazmatProtocol
 import os
 
-/// What the listener asks before exporting anything: does the process behind
-/// this connection carry the identity the daemon trusts.
+/// What the listener puts on a connection before exporting anything: the code
+/// requirement the system checks the sender of every message against. A peer
+/// that does not satisfy it never reaches the exported object.
 public protocol ConnectionVerifying: Sendable {
-    func accepts(processIdentifier: pid_t) -> Bool
+    /// The requirement in the system's own language, or the reason it cannot
+    /// be read. An unreadable requirement refuses the connection.
+    func readableRequirement() throws -> String
 }
 
 extension SignatureVerifier: ConnectionVerifying {}
@@ -65,8 +68,10 @@ final class DaemonService: NSObject, HazmatDaemonXPC {
     }
 }
 
-/// Accepts a connection only when its process satisfies the code requirement,
-/// then exports the handler over it.
+/// Puts the code requirement on every connection and exports the handler over
+/// it. The requirement is checked by the system against the audit token of each
+/// message's sender, not by this code against a process identifier at accept
+/// time, so a process that is replaced after connecting does not keep its access.
 public final class DaemonListenerDelegate: NSObject, NSXPCListenerDelegate, @unchecked Sendable {
     private let handler: DaemonWriteHandler
     private let verifier: ConnectionVerifying
@@ -88,11 +93,14 @@ public final class DaemonListenerDelegate: NSObject, NSXPCListenerDelegate, @unc
     }
 
     public func listener(_ listener: NSXPCListener, shouldAcceptNewConnection connection: NSXPCConnection) -> Bool {
-        let processIdentifier = connection.processIdentifier
-        guard verifier.accepts(processIdentifier: processIdentifier) else {
-            logger.error("refused a connection from process \(processIdentifier): it does not satisfy the daemon's code requirement")
+        let requirement: String
+        do {
+            requirement = try verifier.readableRequirement()
+        } catch {
+            logger.error("refused a connection: the daemon's code requirement cannot be read (\(error))")
             return false
         }
+        connection.setCodeSigningRequirement(requirement)
         idleExit?.connectionOpened()
         // Interruption and invalidation can both arrive for one connection, and
         // either way the client is gone.

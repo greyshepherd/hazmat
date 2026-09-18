@@ -37,6 +37,26 @@ documented size bound. Nothing is written when a request is refused.
 - **WHEN** the bytes exceed the size bound
 - **THEN** the request is refused and the file is unchanged
 
+### Requirement: Only the managed block may change
+
+The privileged side MUST refuse a write whose bytes differ from the live file
+anywhere outside the managed block. With the block taken out of both, the
+planned bytes MUST equal the live file, so the one thing the privileged side
+can ever change is the block it owns, whoever the client is. Nothing is written
+when a request is refused.
+
+#### Scenario: An entry outside the block
+- **WHEN** the bytes add, remove or change a line outside the block, or drop the rest of the file
+- **THEN** the request is refused with a reason and the file is unchanged
+
+#### Scenario: A first apply
+- **WHEN** the bytes are the live file with a block and its one separator inserted
+- **THEN** the request is accepted, because stripping the block restores the live file
+
+#### Scenario: A live file whose markers cannot be read
+- **WHEN** the live file holds a marker set that is not one well-formed block
+- **THEN** the request is refused and the file is unchanged
+
 ### Requirement: The write is atomic
 
 The file MUST be replaced in a single step, so that a reader sees either the
@@ -69,7 +89,11 @@ symbolic link.
 ### Requirement: A write is accepted only from the app that registered the helper
 
 The privileged side MUST verify that a request comes from its own app, and MUST
-refuse requests from any other client. When the running daemon itself carries a
+refuse requests from any other client. The requirement MUST be put on the
+connection so the system checks the sender of every message against it, rather
+than checked once against a process identifier when the connection is accepted:
+a process identifier can be reused, and a check made at accept time says
+nothing about who sends the next message. When the running daemon itself carries a
 team identifier — that is, when it was signed for distribution — the requirement
 it checks MUST anchor that team as well as the app's identifier, so that an
 ad-hoc build of the same identifier cannot write. When the daemon carries no team

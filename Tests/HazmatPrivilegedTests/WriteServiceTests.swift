@@ -77,6 +77,48 @@ final class WriteServiceTests: XCTestCase {
         XCTAssertEqual(try directory.entries(), ["hosts"])
     }
 
+    // MARK: - Only the block may change
+
+    func testRefusesBytesThatChangeTheFileOutsideTheBlock() throws {
+        let cases: [(String, Data)] = [
+            ("an entry added above the block", bytes(text(live).replacingOccurrences(of: "::1             localhost\n", with: "::1             localhost\n0.0.0.0 apple.com\n"))),
+            ("an entry removed above the block", bytes(text(live).replacingOccurrences(of: "127.0.0.1\tlocalhost\n", with: ""))),
+            ("an entry redirected above the block", bytes(text(live).replacingOccurrences(of: "127.0.0.1\tlocalhost", with: "10.0.0.1\tlocalhost"))),
+            ("content appended after the block", bytes(text(live) + "10.0.0.9 trailing.example\n")),
+            ("only the block, with the rest of the file dropped", bytes("# >>> hazmat:managed v1 >>>\n127.0.0.1 hazmat.local\n# <<< hazmat:managed v1 <<<\n"))
+        ]
+
+        for (label, planned) in cases {
+            XCTAssertNil(PlannedBytes.refusal(planned), "\(label) must pass the byte contract on its own")
+            XCTAssertEqual(service.write(bytes: planned, baselineDigest: digest), .refused(.bytesOutsideBlockChanged), label)
+            XCTAssertEqualBytes(try directory.contents(), live, "the file changed for \(label)")
+        }
+    }
+
+    func testAFirstApplyChangesNothingButTheSeparatorItInserts() throws {
+        // A first apply lands a block behind one `\n`; stripping the block takes
+        // the separator with it, so the file outside the block is unchanged.
+        let plain = bytes("127.0.0.1\tlocalhost\n::1\tlocalhost\n")
+        try directory.write(plain)
+        let block = bytes("# >>> hazmat:managed v1 >>>\n127.0.0.1 hazmat.local\n# <<< hazmat:managed v1 <<<\n")
+        let planned = try BlockSplice.splice(block: block, into: plain)
+
+        XCTAssertEqual(service.write(bytes: planned, baselineDigest: BaselineDigest.of(plain)), .written)
+        XCTAssertEqualBytes(try directory.contents(), planned)
+    }
+
+    func testALiveFileWhoseMarkersCannotBeReadIsNeverWrittenOver() throws {
+        let unterminated = bytes("127.0.0.1\tlocalhost\n# >>> hazmat:managed v1 >>>\n127.0.0.1 hazmat.local\n")
+        try directory.write(unterminated)
+        let planned = bytes("127.0.0.1\tlocalhost\n# >>> hazmat:managed v1 >>>\n127.0.0.1 hazmat.local\n# <<< hazmat:managed v1 <<<\n")
+
+        XCTAssertEqual(
+            service.write(bytes: planned, baselineDigest: BaselineDigest.of(unterminated)),
+            .refused(.block(.unterminatedBlock(line: 2)))
+        )
+        XCTAssertEqualBytes(try directory.contents(), unterminated)
+    }
+
     // MARK: - 3.6 The request carries the state the plan was based on
 
     func testRefusesAWriteWhenTheFileNoLongerMatchesTheBaseline() throws {

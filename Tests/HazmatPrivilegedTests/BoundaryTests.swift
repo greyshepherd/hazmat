@@ -159,7 +159,6 @@ final class BoundaryTests: XCTestCase {
         // the client a distribution daemon must refuse.
         let anchored = SignatureVerifier.shipping(appIdentifier: ownIdentifier, teamIdentifier: "ABCDE12345")
         XCTAssertFalse(anchored.accepts(code: code))
-        XCTAssertFalse(anchored.accepts(processIdentifier: getpid()))
     }
 
     func testAClientThatDoesNotSatisfyTheRequirementIsRefused() throws {
@@ -175,6 +174,31 @@ final class BoundaryTests: XCTestCase {
         XCTAssertFalse(SignatureVerifier(requirement: "not a requirement at all").accepts(code: code))
     }
 
+    func testAnUnreadableRequirementRefusesTheConnectionRatherThanRaising() throws {
+        let directory = try TemporaryDirectory()
+        defer { directory.remove() }
+        try directory.write(appliedHosts())
+        let handler = DaemonWriteHandler(
+            service: PrivilegedWriteService(target: directory.target, owner: testOwnership())
+        )
+
+        XCTAssertThrowsError(try SignatureVerifier(requirement: "not a requirement at all").readableRequirement())
+
+        let listener = NSXPCListener.anonymous()
+        let delegate = DaemonListenerDelegate(
+            handler: handler,
+            verifier: SignatureVerifier(requirement: "not a requirement at all")
+        )
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        XCTAssertFalse(delegate.listener(listener, shouldAcceptNewConnection: connection))
+        XCTAssertNil(connection.exportedObject, "a connection with no readable requirement must not be given the handler")
+    }
+
+    /// The requirement is put on the connection, and the system checks the
+    /// sender of every message against it, so the refusal is seen by the client
+    /// as a message that is never answered rather than by the delegate as a
+    /// decision at accept time. Both directions are exercised through a real
+    /// listener: this process satisfies its own identifier and no other.
     func testAProcessThatDoesNotSatisfyTheRequirementNeverReachesTheHandler() throws {
         var selfCode: SecCode?
         XCTAssertEqual(SecCodeCopySelf([], &selfCode), errSecSuccess)
@@ -188,30 +212,76 @@ final class BoundaryTests: XCTestCase {
             service: PrivilegedWriteService(target: directory.target, owner: testOwnership())
         )
 
-        let listener = NSXPCListener.anonymous()
-
+        // The listener holds its delegate weakly, so each is kept for its exchange.
         let rejecting = DaemonListenerDelegate(
             handler: handler,
             verifier: SignatureVerifier.development(appIdentifier: "com.greyshepherd.somebody.else")
         )
-        let refusedConnection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        XCTAssertFalse(rejecting.listener(listener, shouldAcceptNewConnection: refusedConnection))
-        XCTAssertNil(refusedConnection.exportedObject, "a refused client must not be given the handler")
+        let refused = try answer(to: rejecting)
+        XCTAssertEqual(refused, .unanswered, "a client that does not satisfy the requirement must not be answered")
         XCTAssertEqualBytes(try directory.contents(), live, "the file changed for a refused client")
 
-        // The daemon identifies the client by the process behind the connection.
-        XCTAssertFalse(
-            SignatureVerifier.development(appIdentifier: "com.greyshepherd.somebody.else").accepts(processIdentifier: getpid())
+        let accepting = DaemonListenerDelegate(
+            handler: handler,
+            verifier: SignatureVerifier.development(appIdentifier: ownIdentifier)
         )
-        XCTAssertTrue(SignatureVerifier.development(appIdentifier: ownIdentifier).accepts(processIdentifier: getpid()))
-
-        // A connection that satisfies the requirement gets the handler exported.
-        let accepting = DaemonListenerDelegate(handler: handler, verifier: AlwaysAccepts())
-        let acceptedConnection = NSXPCConnection(listenerEndpoint: listener.endpoint)
-        XCTAssertTrue(accepting.listener(listener, shouldAcceptNewConnection: acceptedConnection))
-        XCTAssertNotNil(acceptedConnection.exportedInterface)
-        XCTAssertNotNil(acceptedConnection.exportedObject)
+        let accepted = try answer(to: accepting)
+        XCTAssertEqual(accepted, .answered, "a client that satisfies the requirement is answered")
         XCTAssertEqualBytes(try directory.contents(), live, "accepting a connection must write nothing")
+    }
+
+    private enum CheckAnswer: Equatable {
+        case answered
+        case unanswered
+    }
+
+    /// Sends one check through a listener the delegate serves, and reports
+    /// whether it was answered before the connection failed or the bound ran out.
+    private func answer(to delegate: DaemonListenerDelegate) throws -> CheckAnswer {
+        let listener = NSXPCListener.anonymous()
+        listener.delegate = delegate
+        listener.resume()
+        defer { listener.invalidate() }
+
+        let connection = NSXPCConnection(listenerEndpoint: listener.endpoint)
+        connection.remoteObjectInterface = NSXPCInterface(with: HazmatDaemonXPC.self)
+        let outcome = FirstAnswer()
+        let done = expectation(description: "the check is answered or the connection fails")
+        connection.invalidationHandler = { if outcome.record(.unanswered) { done.fulfill() } }
+        connection.interruptionHandler = { if outcome.record(.unanswered) { done.fulfill() } }
+        connection.resume()
+        defer { connection.invalidate() }
+
+        let proxy = try XCTUnwrap(
+            connection.remoteObjectProxyWithErrorHandler { _ in
+                if outcome.record(.unanswered) { done.fulfill() }
+            } as? HazmatDaemonXPC
+        )
+        proxy.checkIn { if outcome.record(.answered) { done.fulfill() } }
+
+        wait(for: [done], timeout: 5)
+        return outcome.value ?? .unanswered
+    }
+
+    /// First answer wins: the reply, the error handler and the invalidation
+    /// handler can each arrive on their own thread.
+    private final class FirstAnswer: @unchecked Sendable {
+        private let lock = NSLock()
+        private var answer: CheckAnswer?
+
+        func record(_ value: CheckAnswer) -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard answer == nil else { return false }
+            answer = value
+            return true
+        }
+
+        var value: CheckAnswer? {
+            lock.lock()
+            defer { lock.unlock() }
+            return answer
+        }
     }
 
     /// The listener hands connection open and close to the idle rule, so a daemon
@@ -237,7 +307,7 @@ final class BoundaryTests: XCTestCase {
         }
         let delegate = DaemonListenerDelegate(
             handler: handler,
-            verifier: AlwaysAccepts(),
+            verifier: OwnIdentifier(),
             idleExit: idle
         )
         let listener = NSXPCListener.anonymous()
@@ -278,10 +348,27 @@ final class BoundaryTests: XCTestCase {
     }
 }
 
-/// The seam the listener is tested through: a connection's process identity is
-/// supplied by the transport, so the decision can be exercised without one.
-private struct AlwaysAccepts: ConnectionVerifying {
-    func accepts(processIdentifier: pid_t) -> Bool { true }
+/// The seam the listener is tested through: the requirement this process
+/// satisfies, so a connection from it is served.
+private struct OwnIdentifier: ConnectionVerifying {
+    func readableRequirement() throws -> String {
+        var selfCode: SecCode?
+        guard SecCodeCopySelf([], &selfCode) == errSecSuccess, let selfCode else {
+            throw SignatureError.requirementUnreadable("own code")
+        }
+        var staticCode: SecStaticCode?
+        guard SecCodeCopyStaticCode(selfCode, [], &staticCode) == errSecSuccess, let staticCode else {
+            throw SignatureError.requirementUnreadable("own static code")
+        }
+        var information: CFDictionary?
+        guard SecCodeCopySigningInformation(staticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &information) == errSecSuccess,
+              let dictionary = information as? [String: Any],
+              let identifier = dictionary[kSecCodeInfoIdentifier as String] as? String
+        else {
+            throw SignatureError.requirementUnreadable("own identifier")
+        }
+        return try SignatureVerifier.development(appIdentifier: identifier).readableRequirement()
+    }
 }
 
 /// The argument types of an Objective-C encoding, with the byte offsets the
