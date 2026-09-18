@@ -2,6 +2,7 @@ import Foundation
 import HazmatAppSupport
 import HazmatProtocol
 import XCTest
+@testable import HazmatAppSupport
 
 /// What a check for the helper makes of a service that answers, one that never
 /// answers, and one that refuses the connection. Each service is a listener this
