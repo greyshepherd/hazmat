@@ -105,7 +105,9 @@ final class StoreAuthoringTests: XCTestCase {
             XCTAssertEqual(layout.profileURL(ProfileID("work")).path, root.appendingPathComponent("profiles/work.profile").path)
             XCTAssertEqual(layout.fragmentsDirectory.lastPathComponent, "fragments")
             XCTAssertEqual(layout.profilesDirectory.lastPathComponent, "profiles")
-            XCTAssertFalse(layout.exists, "nothing has created the default store here")
+            // Nothing here asserts that the default root is empty: running the app
+            // creates it, and the acceptance walk runs the app. What `exists` means
+            // is asserted against a root this suite chooses.
         }
     }
 
