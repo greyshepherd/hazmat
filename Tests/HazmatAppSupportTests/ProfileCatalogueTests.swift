@@ -74,7 +74,7 @@ final class ProfileCatalogueTests: XCTestCase {
     func testTheShellUsesTheProfilessRenderedBlockAndNeverTheResolvedNames() {
         let model = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellModel.swift" }?.1 ?? ""
 
-        XCTAssertTrue(model.contains("catalogue.renderedBlock(for: profile)"), model)
+        XCTAssertTrue(model.contains("catalogue.renderedBlock(for: matched)"), model)
         XCTAssertFalse(model.contains(".resolved"), model)
     }
 }

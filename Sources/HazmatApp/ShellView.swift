@@ -1,225 +1,126 @@
 import HazmatAppSupport
-import HazmatCore
 import SwiftUI
 
-/// The window: the store's profiles and fragments, the selected fragment's
-/// text, the selected profile's layer stack, and what that profile resolves to.
-/// Every value comes from the presentation in app support, so this renders and
-/// forwards rather than deciding.
+/// The window: three panes at once — the store's profiles and fragments, the
+/// selected item, and the block it resolves to — with the phase deciding what
+/// each pane offers. Every value comes from the presentation in app support, so
+/// this renders and forwards rather than deciding.
 struct ShellView: View {
     @Bindable var model: ShellModel
-    @State private var fragmentDraft = ""
-    @State private var newProfileName = ""
-    @State private var newFragmentName = ""
+    @Environment(\.colorScheme) private var colorScheme
+    @State private var searchPresented = false
 
     var body: some View {
-        let editor = model.editor
-        VStack(alignment: .leading, spacing: 12) {
-            header
-            store(editor)
-            HStack(alignment: .top, spacing: 12) {
-                profiles(editor)
-                fragments(editor)
-            }
-            fragmentText(editor)
-            layerStack(editor)
-            resolved(editor)
-            hostsFile(editor)
-            Text(model.notice)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
+        let editor: EditorPresentation = model.editor
+        let palette = BrandPalette.forAppearance(colorScheme)
+
+        NavigationSplitView(columnVisibility: columnVisibility) {
+            SidebarView(model: model)
+        } content: {
+            ContentPane(model: model)
+                .navigationSplitViewColumnWidth(min: 320, ideal: 440)
+        } detail: {
+            DetailPane(model: model)
+                .navigationSplitViewColumnWidth(min: 300, ideal: 380)
         }
-        .padding(16)
-        .frame(width: 760)
+        .navigationTitle("Hazmat")
+        .navigationSubtitle(editor.windowSubtitle)
+        .searchable(
+            text: $model.searchText,
+            isPresented: $searchPresented,
+            placement: .sidebar,
+            prompt: "Search profiles and fragments"
+        )
+        .toolbar { toolbar }
+        .environment(\.brand, palette)
+        .tint(palette.accent.color)
+        .frame(minWidth: 880, minHeight: 560)
         .task { model.refresh() }
-        .onAppear { fragmentDraft = editor.fragmentText }
-        .onChange(of: model.editor.fragmentText) { _, text in fragmentDraft = text }
-        .onChange(of: model.selectedProfile) { model.selectionChanged() }
-        .onChange(of: model.selectedFragment) { model.selectionChanged() }
-    }
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("Hazmat")
-                .font(.title2)
-                .bold()
-            Text(model.helper.summary)
-            HStack {
-                Button("Register") { model.register() }
-                    .disabled(model.helper != .notRegistered || model.busy)
-                Button("Unregister") { model.unregister() }
-                    .disabled(model.helper == .notRegistered || model.busy)
-                Button("Refresh") { model.refresh() }
-                    .disabled(model.busy)
+        .onChange(of: model.searchText) { _, _ in model.searchChanged() }
+        .onChange(of: model.searchScope) { _, _ in model.searchChanged() }
+        .onChange(of: model.searchFocusRequests) { _, _ in searchPresented = true }
+        .sheet(isPresented: $model.showHelperSheet) {
+            HelperSheetView(model: model)
+        }
+        .confirmationDialog(
+            model.confirmation?.title ?? "",
+            isPresented: confirmationPresented,
+            titleVisibility: .visible,
+            presenting: model.confirmation
+        ) { request in
+            Button(request.confirmTitle, role: request.isDestructive ? .destructive : nil) {
+                model.confirm()
             }
+            Button("Cancel", role: .cancel) { model.cancelConfirmation() }
+        } message: { request in
+            Text(request.message)
+        }
+        .alert(
+            model.nameEntry?.title ?? "",
+            isPresented: nameEntryPresented,
+            presenting: model.nameEntry
+        ) { entry in
+            TextField(entry.placeholder, text: $model.nameDraft)
+            Button(entry.confirmTitle) { model.commitNameEntry() }
+            Button("Cancel", role: .cancel) { model.cancelNameEntry() }
         }
     }
 
-    @ViewBuilder
-    private func store(_ editor: EditorPresentation) -> some View {
-        if editor.storeExists {
-            Text(editor.storePath)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-        } else {
-            GroupBox("Store") {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("No store at \(editor.storePath) yet. Creating a profile makes one.")
-                    HStack {
-                        TextField("Profile name", text: $newProfileName)
-                        Button("Create Profile") { model.createProfile(named: newProfileName) }
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.top, 4)
-            }
-        }
+    private var columnVisibility: Binding<NavigationSplitViewVisibility> {
+        Binding(
+            get: { model.sidebarVisible ? .all : .doubleColumn },
+            set: { model.sidebarVisible = $0 == .all }
+        )
     }
 
-    private func profiles(_ editor: EditorPresentation) -> some View {
-        GroupBox("Profiles") {
-            VStack(alignment: .leading, spacing: 8) {
-                List(selection: $model.selectedProfile) {
-                    ForEach(editor.profiles, id: \.self) { profile in
-                        HStack {
-                            Text(profile.rawValue)
-                            if editor.isApplied, editor.selectedProfile == profile {
-                                Spacer()
-                                Text("applied")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .tag(Optional(profile))
-                    }
-                }
-                .frame(minHeight: 110)
-
-                TextField("Name", text: $newProfileName)
-                HStack {
-                    Button("New") { model.createProfile(named: newProfileName) }
-                    Button("Rename") { model.renameProfile(to: newProfileName) }
-                        .disabled(editor.selectedProfile == nil)
-                    Button("Duplicate") { model.duplicateProfile(as: newProfileName) }
-                        .disabled(editor.selectedProfile == nil)
-                    Button("Delete") { model.deleteProfile() }
-                        .disabled(editor.selectedProfile == nil)
-                }
-            }
-            .padding(.top, 4)
-        }
+    private var confirmationPresented: Binding<Bool> {
+        Binding(
+            get: { model.confirmation != nil },
+            set: { shown in if !shown { model.cancelConfirmation() } }
+        )
     }
 
-    private func fragments(_ editor: EditorPresentation) -> some View {
-        GroupBox("Fragments") {
-            VStack(alignment: .leading, spacing: 8) {
-                List(selection: $model.selectedFragment) {
-                    ForEach(editor.fragments, id: \.self) { fragment in
-                        Text(fragment.rawValue).tag(Optional(fragment))
-                    }
-                }
-                .frame(minHeight: 110)
-
-                TextField("Name", text: $newFragmentName)
-                HStack {
-                    Button("New") { model.createFragment(named: newFragmentName) }
-                    Button("Rename") { model.renameFragment(to: newFragmentName) }
-                        .disabled(editor.selectedFragment == nil)
-                    Button("Duplicate") { model.duplicateFragment(as: newFragmentName) }
-                        .disabled(editor.selectedFragment == nil)
-                    Button("Delete") { model.deleteFragment() }
-                        .disabled(editor.selectedFragment == nil)
-                }
-            }
-            .padding(.top, 4)
-        }
+    private var nameEntryPresented: Binding<Bool> {
+        Binding(
+            get: { model.nameEntry != nil },
+            set: { shown in if !shown { model.cancelNameEntry() } }
+        )
     }
 
-    private func fragmentText(_ editor: EditorPresentation) -> some View {
-        GroupBox("Fragment \(editor.selectedFragment?.rawValue ?? "—")") {
-            VStack(alignment: .leading, spacing: 8) {
-                TextEditor(text: $fragmentDraft)
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 120)
-                Button("Save") { model.saveFragment(text: fragmentDraft) }
-                    .disabled(editor.selectedFragment == nil || model.busy)
+    /// The toolbar carries the sidebar toggle, the new-item menu and reload:
+    /// actions every phase can perform, each with the shortcut the menu bar
+    /// binds.
+    @ToolbarContentBuilder
+    private var toolbar: some ToolbarContent {
+        let commands: CommandPresentation = model.commands
+        ToolbarItem(placement: .navigation) {
+            Button {
+                model.perform(.toggleSidebar)
+            } label: {
+                Image(systemName: "sidebar.left")
             }
-            .padding(.top, 4)
+            .help(commands.item("toggle-sidebar")?.title ?? WindowAction.toggleSidebar.title)
         }
-    }
-
-    private func layerStack(_ editor: EditorPresentation) -> some View {
-        GroupBox("Layers of \(editor.selectedProfile?.rawValue ?? "—")") {
-            VStack(alignment: .leading, spacing: 6) {
-                ForEach(Array(editor.layers.enumerated()), id: \.offset) { index, layer in
-                    HStack {
-                        Text("\(index + 1). \(layer.rawValue)")
-                        Spacer()
-                        Button("Up") { model.moveLayer(from: index, to: index - 1) }
-                            .disabled(index == 0)
-                        Button("Down") { model.moveLayer(from: index, to: index + 1) }
-                            .disabled(index == editor.layers.count - 1)
-                        Button("Remove") { model.removeLayer(at: index) }
-                    }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Menu {
+                Button(commands.item("new-profile")?.title ?? WindowAction.newProfile.title) {
+                    model.perform(.newProfile)
                 }
-                if editor.layers.isEmpty {
-                    Text("No layers. The profile renders an empty block.")
-                        .foregroundStyle(.secondary)
+                Button(commands.item("new-fragment")?.title ?? WindowAction.newFragment.title) {
+                    model.perform(.newFragment)
                 }
-                Menu("Add Layer") {
-                    ForEach(editor.fragments, id: \.self) { fragment in
-                        Button(fragment.rawValue) { model.addLayer(fragment) }
-                    }
-                }
-                .disabled(editor.selectedProfile == nil || editor.fragments.isEmpty)
+            } label: {
+                Image(systemName: "plus")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
-        }
-    }
-
-    private func resolved(_ editor: EditorPresentation) -> some View {
-        GroupBox("Resolved") {
-            VStack(alignment: .leading, spacing: 4) {
-                ForEach(Array(editor.entries.enumerated()), id: \.offset) { _, entry in
-                    Text("\(entry.address) \(entry.name) — \(entry.source.fragment.rawValue):\(entry.source.line)")
-                }
-                ForEach(Array(editor.displacements.enumerated()), id: \.offset) { _, displaced in
-                    Text(
-                        "\(displaced.address) \(displaced.name) displaced by \(displaced.displacedBy.fragment.rawValue):\(displaced.displacedBy.line) over \(displaced.source.fragment.rawValue):\(displaced.source.line)"
-                    )
-                    .foregroundStyle(.secondary)
-                }
-                ForEach(Array(editor.problems.enumerated()), id: \.offset) { _, problem in
-                    Text(problem.message)
-                }
-                if editor.problems.isEmpty, editor.entries.isEmpty, editor.selectedProfile != nil {
-                    Text("This profile resolves to nothing.")
-                        .foregroundStyle(.secondary)
-                }
-                if let problem = editor.storeProblem {
-                    Text(problem)
-                }
+            .help("New Profile (⌘N) or New Fragment (⇧⌘N)")
+            Button {
+                model.perform(.reload)
+            } label: {
+                Image(systemName: "arrow.clockwise")
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
-        }
-    }
-
-    private func hostsFile(_ editor: EditorPresentation) -> some View {
-        GroupBox("Hosts file") {
-            VStack(alignment: .leading, spacing: 8) {
-                Text(model.liveDescription)
-                HStack {
-                    Button("Apply") { model.apply() }
-                    Button("Overwrite Drift") { model.overwriteDrift() }
-                        .disabled(editor.live.liveBlock == nil)
-                    Button("Remove Block") { model.removeBlock() }
-                }
-                .disabled(model.helper != .enabled || model.busy)
-            }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.top, 4)
+            .help(
+                "\(commands.item("reload")?.title ?? WindowAction.reload.title) (\(commands.item("reload")?.shortcut?.display ?? "⌘R"))"
+            )
         }
     }
 }

@@ -16,6 +16,7 @@ BUNDLE_ID="com.greyshepherd.hazmat"
 DAEMON_LABEL="com.greyshepherd.hazmat.daemon"
 APP_NAME="Hazmat"
 APP="$ROOT/build/$APP_NAME.app"
+ASSETS="$ROOT/Assets"
 VERSION="0.1.0"
 
 cd "$ROOT"
@@ -30,9 +31,19 @@ for executable in HazmatApp HazmatDaemon; do
 done
 
 rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Library/LaunchDaemons" "$APP/Contents/Resources"
 cp "$BIN/HazmatApp" "$APP/Contents/MacOS/HazmatApp"
 cp "$BIN/HazmatDaemon" "$APP/Contents/MacOS/HazmatDaemon"
+
+# The brand assets: the Dock icon and the menu-bar mark. The mark is a template
+# image, so the system tints it; the icon is named in the property list below.
+for asset in "$APP_NAME.icns" menu-bar-template.png menu-bar-template@2x.png; do
+    if [ ! -f "$ASSETS/$asset" ]; then
+        echo "error: Assets/$asset is missing" >&2
+        exit 1
+    fi
+    cp "$ASSETS/$asset" "$APP/Contents/Resources/$asset"
+done
 
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -43,6 +54,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>en</string>
     <key>CFBundleExecutable</key>
     <string>HazmatApp</string>
+    <key>CFBundleIconFile</key>
+    <string>$APP_NAME</string>
     <key>CFBundleIdentifier</key>
     <string>$BUNDLE_ID</string>
     <key>CFBundleInfoDictionaryVersion</key>
@@ -105,6 +118,22 @@ fi
 codesign --verify --strict "$APP/Contents/MacOS/HazmatApp"
 codesign --verify --strict "$APP/Contents/MacOS/HazmatDaemon"
 codesign --verify --strict "$APP"
+
+for asset in "$APP_NAME.icns" menu-bar-template.png menu-bar-template@2x.png; do
+    if [ ! -f "$APP/Contents/Resources/$asset" ]; then
+        echo "error: the bundle carries no $asset" >&2
+        exit 1
+    fi
+done
+
+read -r icon < <(/usr/libexec/PlistBuddy -c "Print :CFBundleIconFile" "$APP/Contents/Info.plist")
+if [ "$icon" != "$APP_NAME" ]; then
+    echo "error: the bundle's property list does not name the icon" >&2
+    exit 1
+fi
+
+echo "icon:     $APP/Contents/Resources/$APP_NAME.icns"
+echo "mark:     $APP/Contents/Resources/menu-bar-template.png"
 
 echo "bundle:   $APP"
 echo "label:    $label"

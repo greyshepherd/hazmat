@@ -26,11 +26,36 @@ final class HelperStateTests: XCTestCase {
     }
 
     func testTheShellShowsTheStateTheRegistrationAPIReports() {
-        let view = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellView.swift" }?.1 ?? ""
+        // Through the presentation: a glyph, a word and a tone, all derived
+        // from what ServiceManagement reported.
+        let sidebar = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "SidebarView.swift" }?.1 ?? ""
+        XCTAssertFalse(sidebar.isEmpty, "the sidebar is missing")
+        XCTAssertTrue(sidebar.contains("helper.symbolName"), sidebar)
+        XCTAssertTrue(sidebar.contains("helper.label"), sidebar)
+        XCTAssertTrue(sidebar.contains("helper.tone"), sidebar)
+        XCTAssertTrue(sidebar.contains("helper.remedy"), sidebar)
 
-        XCTAssertFalse(view.isEmpty)
-        XCTAssertTrue(view.contains("model.helper.summary"), view)
-        XCTAssertTrue(view.contains("model.helper != .enabled"), view)
+        let model = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellModel.swift" }?.1 ?? ""
+        XCTAssertTrue(model.contains("registration.state"), model)
+        XCTAssertTrue(model.contains("HelperSheetPresentation(current: helper)"), model)
+
+        XCTAssertEqual(HelperState.notRegistered.label, "Helper not installed")
+        XCTAssertEqual(HelperState.awaitingApproval.label, "Helper needs approval")
+        XCTAssertEqual(HelperState.enabled.label, "Writes ready")
+    }
+
+    func testTheHelperSheetNamesTheThreeStatesAndTheActionsTheyNeed() {
+        let sheet = HelperSheetPresentation(current: .notRegistered)
+
+        XCTAssertEqual(sheet.states.map(\.state), [.notRegistered, .awaitingApproval, .enabled])
+        XCTAssertEqual(Set(sheet.states.map(\.detail)).count, 3)
+        XCTAssertEqual(sheet.privileges.count, 3, "the three privileges the helper holds")
+        for privilege in sheet.privileges {
+            XCTAssertFalse(privilege.detail.isEmpty)
+        }
+        XCTAssertTrue(sheet.states.contains { $0.detail.contains("Login Items") }, "approval names where it is granted")
+        XCTAssertEqual(sheet.current.remedy, .installHelper)
+        XCTAssertNil(HelperState.enabled.remedy)
     }
 
     // MARK: - 5.2 Registration errors keep their cause
