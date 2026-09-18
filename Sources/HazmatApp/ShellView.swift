@@ -10,8 +10,6 @@ struct ShellView: View {
     @State private var searchPresented = false
 
     var body: some View {
-        let editor: EditorPresentation = model.editor
-
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(model: model)
         } content: {
@@ -22,7 +20,6 @@ struct ShellView: View {
                 .navigationSplitViewColumnWidth(min: 320, ideal: 600)
         }
         .navigationTitle("Hazmat")
-        .navigationSubtitle(editor.windowSubtitle)
         .searchable(
             text: $model.searchText,
             isPresented: $searchPresented,

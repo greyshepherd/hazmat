@@ -4,7 +4,7 @@ import XCTest
 @testable import HazmatAppSupport
 
 /// The values the panes render: the live file's path, entry and layer counts,
-/// per-layer counts, a fragment's using profiles, search, and the subtitle.
+/// per-layer counts, a fragment's using profiles, and search.
 final class EditorPresentationTests: XCTestCase {
     private let base = FragmentID("base")
     private let project = FragmentID("project")
@@ -235,61 +235,6 @@ final class EditorPresentationTests: XCTestCase {
         let presentation = model.read(selection: .profile(work), search: StoreSearch(text: "project"))
 
         XCTAssertEqual(presentation.content(phase: .nothingSelected), .phase(.nothingSelected))
-    }
-
-    // MARK: - 5.5 The window's subtitle
-
-    func testTheSubtitleNamesTheSelectionAndBothCounts() throws {
-        func fragment(_ name: String, entries: Int) -> (String, String) {
-            let lines = (1...entries).map { "10.0.0.\($0)\t\(name)\($0).example\n" }.joined()
-            return (lines, "fragments/\(name).hosts")
-        }
-        let fixture = try StoreFixture(
-            store: [
-                fragment("ads", entries: 7),
-                fragment("trackers", entries: 8),
-                fragment("dev", entries: 4),
-                ("ads\ntrackers\ndev\n", "profiles/focus.profile")
-            ],
-            live: "127.0.0.1\tlocalhost\n"
-        )
-        defer { fixture.remove() }
-        let model = fixture.model(writer: UnregisteredHelper())
-
-        let presentation = model.read(selection: .profile(ProfileID("focus")))
-
-        XCTAssertEqual(presentation.entryCount, 19)
-        XCTAssertEqual(presentation.layerCount, 3)
-        XCTAssertEqual(presentation.windowSubtitle, "focus — 19 entries · 3 layers")
-    }
-
-    func testTheSubtitleNamesAFragmentAndItsUsers() throws {
-        let fixture = try StoreFixture(
-            store: [
-                ("127.0.0.1\tlocalhost\n", "fragments/base.hosts"),
-                ("base\n", "profiles/one.profile"),
-                ("base\n", "profiles/two.profile")
-            ],
-            live: "127.0.0.1\tlocalhost\n"
-        )
-        defer { fixture.remove() }
-        let model = fixture.model(writer: UnregisteredHelper())
-
-        XCTAssertEqual(
-            model.read(selection: .fragment(base)).windowSubtitle,
-            "base — 1 entry · used by 2 profiles"
-        )
-    }
-
-    func testTheSubtitleSaysWhenTheStoreHoldsNothing() throws {
-        let store = try TemporaryStore()
-        let root = store.root
-        store.remove()
-        let live = try LiveFile("127.0.0.1\tlocalhost\n")
-        defer { live.remove() }
-        let model = EditorModel(storeRoot: root, fileURL: live.url, writer: UnregisteredHelper())
-
-        XCTAssertEqual(model.read().windowSubtitle, root.path)
     }
 
     // MARK: - The applied marks

@@ -193,9 +193,7 @@ active.
 
 The window MUST open at a documented default size that fits three panes, MUST
 enforce a content minimum, and MUST restore its size and position across
-launches. The window's title MUST name the application, and the selected
-profile's name together with its entry and layer counts MUST appear as the
-window's subtitle.
+launches. The window's title MUST name the application.
 
 #### Scenario: First launch
 - **WHEN** the application launches with no restored window state
@@ -208,10 +206,6 @@ window's subtitle.
 #### Scenario: Shrinking past the minimum
 - **WHEN** the window is resized smaller than the content minimum
 - **THEN** it stops at the minimum rather than clipping its panes
-
-#### Scenario: The subtitle names the selection
-- **WHEN** a profile with three layers resolving to nineteen entries is selected
-- **THEN** the subtitle names the profile and both counts
 
 ### Requirement: Colour carries the brand, and state is never colour alone
 

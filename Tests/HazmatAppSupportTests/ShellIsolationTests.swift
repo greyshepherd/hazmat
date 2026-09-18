@@ -81,13 +81,11 @@ final class ShellIsolationTests: XCTestCase {
         "URL("
     ]
 
-    /// The editor scene renders the presentation and forwards choices. The rest
-    /// of the window is held to the same rule below.
+    /// The editor scene renders and forwards; it names no store, composition or
+    /// path type. The panes it composes are held to the same rule below.
     func testTheEditorSceneDecidesNothingItself() {
         let scene = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellView.swift" }?.1 ?? ""
         XCTAssertFalse(scene.isEmpty, "the editor scene is missing")
-        XCTAssertTrue(scene.contains("EditorPresentation"), scene)
-        XCTAssertTrue(scene.contains("let editor: EditorPresentation = model.editor"), scene)
 
         for needle in Self.storeAndCompositionNames {
             XCTAssertNil(scene.range(of: needle), "the editor scene contains \(needle)")

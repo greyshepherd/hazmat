@@ -208,22 +208,4 @@ public struct EditorPresentation: Equatable, Sendable {
     public func isApplied(_ profile: ProfileID) -> Bool {
         appliedProfiles.contains(profile)
     }
-
-    /// The window's subtitle: the selected item's name and its counts.
-    public var windowSubtitle: String {
-        switch selection {
-        case .profile(let profile):
-            let entries = entryCount
-            let layers = layerCount
-            return "\(profile) — \(entries) \(entries == 1 ? "entry" : "entries") · \(layers) \(layers == 1 ? "layer" : "layers")"
-        case .fragment(let fragment):
-            let entries = entryCount(of: fragment) ?? 0
-            let used = usingProfiles.count
-            return "\(fragment) — \(entries) \(entries == 1 ? "entry" : "entries") · used by \(used) \(used == 1 ? "profile" : "profiles")"
-        case nil:
-            if !storeExists { return storePath }
-            if profiles.isEmpty { return "No profiles" }
-            return ""
-        }
-    }
 }

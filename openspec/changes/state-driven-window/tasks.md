@@ -40,7 +40,7 @@
 - [x] 5.2 Add the sidebar search field bound to the shell model's search state; verify a search narrows both sections and clearing restores the full lists
 - [x] 5.3 Add a settings scene with the store location, the folder chooser, the helper state and its install action; verify a location change re-reads the store and that the settings command opens it
 - [x] 5.4 Add the helper install sheet reachable from the first-run phase and from the sidebar footer, with the three privileges the helper holds and the states it can be in; verify registration, awaiting approval and enabled
-- [x] 5.5 Set the window's title and subtitle (application name, selected profile, its entry and layer counts), the default size, the content minimum and size restoration; verify the default on a fresh launch, a restored size, the minimum, and the subtitle's counts
+- [x] 5.5 Set the window's title, the default size, the content minimum and size restoration; verify the default on a fresh launch, a restored size, and the minimum
 - [x] 5.6 Add the toolbar with the sidebar toggle, the new-item menu and reload with its shortcut and help text; verify each control and that the toolbar carries no action that the current phase cannot perform
 
 ## 6. Brand, bundle and appearance
