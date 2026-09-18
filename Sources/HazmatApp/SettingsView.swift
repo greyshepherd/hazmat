@@ -68,7 +68,7 @@ struct SettingsView: View {
             }
 
             if !model.notice.isEmpty {
-                Text(model.notice)
+                Text(model.notice.text)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

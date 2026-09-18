@@ -195,24 +195,38 @@ final class ShellIsolationTests: XCTestCase {
         }
 
         let mark = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
-        XCTAssertTrue(mark.contains("Text(model.menu.statusTitle)"), mark)
+        XCTAssertTrue(mark.contains("accessibilityLabel(model.menu.statusTitle)"), mark)
+        XCTAssertNil(mark.range(of: "Text("), "the bar carries the mark alone: \(mark)")
     }
 
-    /// The mark is a template image the system tints, and the title beside it is
-    /// the part that says what is on.
+    /// The mark is a template image the system tints and the app never
+    /// recolours. One file reads it from the bundle; the status item shows it
+    /// alone, so its accessibility name is what still says what is on.
     func testTheMarkIsATemplateTheSystemTints() {
-        let mark = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
-        XCTAssertFalse(mark.isEmpty, "the status item's mark is missing")
-        XCTAssertTrue(mark.contains("isTemplate = true"), mark)
+        let loader = sourceFiles(in: "Sources/HazmatAppSupport").first { $0.0 == "MenuMark.swift" }?.1 ?? ""
+        XCTAssertFalse(loader.isEmpty, "the mark's loader is missing")
+        XCTAssertTrue(loader.contains("isTemplate = true"), loader)
         XCTAssertTrue(
-            mark.contains("Text(model.menu.statusTitle)"),
-            "the mark must not replace the state title: \(mark)"
+            loader.contains("forResource: \"menu-bar-template\""),
+            "the mark must be looked up by name: \(loader)"
         )
         // Both the one-times and the two-times file have to be loaded, or the
         // mark is soft on a Retina menu bar.
-        XCTAssertTrue(mark.contains("NSImage(named:"), "the mark must be looked up by name: \(mark)")
+        XCTAssertTrue(
+            loader.contains("menu-bar-template@2x"),
+            "the two-times representation must be attached by hand: \(loader)"
+        )
 
-        for (file, source) in sourceFiles(in: "Sources/HazmatApp") {
+        let label = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMark.swift" }?.1 ?? ""
+        XCTAssertFalse(label.isEmpty, "the status item's mark is missing")
+        XCTAssertTrue(
+            label.contains("accessibilityLabel(model.menu.statusTitle)"),
+            "the mark carries the state, so it must name it: \(label)"
+        )
+
+        let sources =
+            sourceFiles(in: "Sources/HazmatApp") + sourceFiles(in: "Sources/HazmatAppSupport")
+        for (file, source) in sources {
             for needle in ["renderingMode(.original)", "isTemplate = false", "isTemplate=false", ".tint("] {
                 XCTAssertNil(source.range(of: needle), "\(file) recolours the mark with \(needle)")
             }

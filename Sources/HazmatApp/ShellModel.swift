@@ -57,7 +57,7 @@ enum NameEntry: Equatable, Sendable {
 @Observable
 final class ShellModel {
     private(set) var helper: HelperState = .notRegistered
-    private(set) var notice = ""
+    private(set) var notice: MenuNotice = .quiet
     private(set) var busy = false
     private(set) var reading: ActiveProfileReading = .missingStore
     private(set) var editor: EditorPresentation
@@ -106,6 +106,9 @@ final class ShellModel {
     private var lastAnswer: (answer: HelperReachability, at: Date)?
     private var checkInFlight = false
     private var repairInFlight = false
+    /// Set once on the main actor and read only in `deinit`, which the actor
+    /// isolation cannot see into.
+    private nonisolated(unsafe) var dockObserver: (any NSObjectProtocol)?
 
     /// How long an answer is trusted while it says the helper is answering. A
     /// check costs a round trip that can take its whole bound when nothing
@@ -148,6 +151,14 @@ final class ShellModel {
         // window opened against a helper that cannot be started says so at once
         // instead of claiming writes are ready for as long as the check takes.
         checkPresenceNow()
+        dockObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification, object: nil, queue: .main
+        ) { [weak self] note in
+            let closing = (note.object as? NSWindow).map(ObjectIdentifier.init)
+            MainActor.assumeIsolated {
+                self?.matchDockPresenceToTheWindows(ignoring: closing)
+            }
+        }
     }
 
     // MARK: - What the scene renders
@@ -351,9 +362,9 @@ final class ShellModel {
     func unregister() {
         do {
             try registration.unregister()
-            notice = "Unregistered."
+            notice = .success("Unregistered.")
         } catch {
-            notice = "\(error)"
+            notice = .failure("\(error)")
         }
         refresh()
     }
@@ -372,7 +383,7 @@ final class ShellModel {
     private func makeHelperAnswer(working: String) {
         guard !repairInFlight else { return }
         repairInFlight = true
-        notice = working
+        notice = .progress(working)
         let repair = HelperRepair(registration: registration, presence: presence)
         Task.detached {
             let outcome = repair.run()
@@ -383,15 +394,15 @@ final class ShellModel {
     private func finishHelperWork(_ outcome: HelperRepair.Outcome) {
         repairInFlight = false
         if let failure = outcome.failure {
-            notice = "The system did not register the helper: \(failure) "
-                + "Allow it in System Settings > General > Login Items & Extensions, or remove it and install it again."
+            notice = .failure("The system did not register the helper: \(failure) "
+                + "Allow it in System Settings > General > Login Items & Extensions, or remove it and install it again.")
         } else if let answer = outcome.answer {
             record(answer)
             notice = answer == .answering
-                ? "The helper answers, so writes are ready."
-                : "The helper was registered and still does not answer."
+                ? .success("The helper answers, so writes are ready.")
+                : .failure("The helper was registered and still does not answer.")
         } else {
-            notice = "Registered. Approve the helper in System Settings to enable writes."
+            notice = .success("Registered. Approve the helper in System Settings to enable writes.")
         }
         refresh()
     }
@@ -402,10 +413,10 @@ final class ShellModel {
         do {
             let outcome = try session.layout.create()
             notice = outcome == .created
-                ? "The store was created at \(session.root.path)."
-                : "The store is already there; nothing to do."
+                ? .success("The store was created at \(session.root.path).")
+                : .success("The store is already there; nothing to do.")
         } catch {
-            notice = "\(error)"
+            notice = .failure("\(error)")
         }
         refresh()
     }
@@ -420,7 +431,7 @@ final class ShellModel {
         searchText = ""
         lastApply = nil
         refresh()
-        notice = "The store is now read from \(session.root.path)."
+        notice = .success("The store is now read from \(session.root.path).")
     }
 
     func chooseStoreLocation() {
@@ -663,7 +674,7 @@ final class ShellModel {
     private func apply(_ profile: ProfileID, replacing replacement: Replacement) {
         let editorModel = session.editor
         busy = true
-        notice = "Applying \(profile)…"
+        notice = .progress("Applying \(profile)…")
         Task.detached {
             let (outcome, change) = editorModel.apply(profile, replacing: replacement)
             await MainActor.run {
@@ -677,7 +688,7 @@ final class ShellModel {
         guard let change = lastApply else { return }
         let editorModel = session.editor
         busy = true
-        notice = "Reverting…"
+        notice = .progress("Reverting…")
         Task.detached {
             let outcome = editorModel.revert(change)
             await MainActor.run {
@@ -690,7 +701,7 @@ final class ShellModel {
     func removeBlock() {
         let applier = session.applier
         busy = true
-        notice = "Removing the block…"
+        notice = .progress("Removing the block…")
         Task.detached {
             let outcome = applier.removeBlock()
             await MainActor.run {
@@ -713,7 +724,7 @@ final class ShellModel {
     func copyStorePath() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(session.root.path, forType: .string)
-        notice = "The store path is on the clipboard."
+        notice = .success("The store path is on the clipboard.")
     }
 
     // MARK: - Commands
@@ -747,7 +758,7 @@ final class ShellModel {
 
     private func finish(_ outcome: ApplyOutcome) {
         busy = false
-        notice = outcome.description
+        notice = MenuNotice(outcome)
         followUp(on: outcome)
         refresh()
     }
@@ -764,7 +775,33 @@ final class ShellModel {
     }
 
     private func finish(_ outcome: EditorOutcome) {
-        notice = outcome.description
+        notice = MenuNotice(outcome)
         refresh()
+    }
+
+    // MARK: - Presence in the Dock
+
+    /// A window is on screen: the application is a regular citizen again, in
+    /// the Dock and the application switcher, and comes forward.
+    func windowOpened() {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// With no window on screen the application lives in the menu bar alone:
+    /// out of the Dock and the switcher, the way menu-bar applications are.
+    /// Decided synchronously, because the closing window is still on screen
+    /// while its notification travels.
+    private func matchDockPresenceToTheWindows(ignoring closing: ObjectIdentifier?) {
+        let windowIsVisible = NSApp.windows.contains { window in
+            ObjectIdentifier(window) != closing && window.level == .normal && window.isVisible
+        }
+        NSApp.setActivationPolicy(windowIsVisible ? .regular : .accessory)
+    }
+
+    deinit {
+        if let dockObserver {
+            NotificationCenter.default.removeObserver(dockObserver)
+        }
     }
 }

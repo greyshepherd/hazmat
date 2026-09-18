@@ -161,7 +161,7 @@ final class ActiveProfileReadingTests: XCTestCase {
         guard case .drifted(let found)? = reading.activation?.state else {
             return XCTFail("expected a drift, got \(reading)")
         }
-        let menu = MenuPresentation(reading: reading, helper: .enabled, notice: "")
+        let menu = MenuPresentation(reading: reading, helper: .enabled, notice: .quiet)
         let item = menu.sections.flatMap(\.items).first { $0.title == "Overwrite drift with 'work'" }
 
         XCTAssertEqual(found, stranger)

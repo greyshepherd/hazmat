@@ -29,8 +29,11 @@ final class PackagingTests: XCTestCase {
                 }
             }
 
+            // A blank canvas would make the check above vacuous. The mask covers
+            // about a quarter of the 22-point canvas and its own lens ports are
+            // punched through it, so the floor is a shape's worth, not a quarter.
             XCTAssertGreaterThan(
-                image.visiblePixels, image.width * image.height / 4,
+                image.visiblePixels, image.width * image.height / 8,
                 "\(name) is nearly empty, so the check above is vacuous"
             )
         }
