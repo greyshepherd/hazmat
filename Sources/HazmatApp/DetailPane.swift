@@ -20,6 +20,10 @@ enum ResolvedViewMode: String, CaseIterable, Equatable {
 struct DetailPane: View {
     @Bindable var model: ShellModel
     @State private var mode: ResolvedViewMode = .text
+    /// The block's rows, built when the presentation changes rather than on
+    /// every look at the pane: a block of a hundred thousand entries is not
+    /// something a body may rebuild.
+    @State private var tableRows: [EntryTableRow] = []
 
     var body: some View {
         let editor: EditorPresentation = model.editor
@@ -98,11 +102,8 @@ struct DetailPane: View {
     /// The block as selectable monospaced text: the bytes that would be written.
     private func blockText(_ editor: EditorPresentation) -> some View {
         let rendered = editor.rendering.map { String(decoding: $0, as: UTF8.self) } ?? ""
-        return Text(rendered)
-            .font(.system(.callout, design: .monospaced))
-            .textSelection(.enabled)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(10)
+        return PlainTextView(text: rendered)
+            .frame(minHeight: 220)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay {
                 RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))
@@ -112,8 +113,7 @@ struct DetailPane: View {
     /// One row per address line: the address, the names on it, and the fragment
     /// that supplied it.
     private func blockTable(_ editor: EditorPresentation) -> some View {
-        let rows = editor.entryLines.enumerated().map { EntryTableRow(id: $0.offset, entry: $0.element) }
-        return Table(rows) {
+        Table(tableRows) {
             TableColumn("Address") { row in
                 Text(row.entry.address)
                     .font(.system(.callout, design: .monospaced))
@@ -129,6 +129,12 @@ struct DetailPane: View {
             }
         }
         .frame(minHeight: 220)
+        .onAppear { tableRows = Self.rows(of: editor) }
+        .onChange(of: editor.renderedBlock) { _, _ in tableRows = Self.rows(of: editor) }
+    }
+
+    private static func rows(of editor: EditorPresentation) -> [EntryTableRow] {
+        editor.entryLines.enumerated().map { EntryTableRow(id: $0.offset, entry: $0.element) }
     }
 
     private func problemRow(_ message: String) -> some View {
@@ -206,7 +212,8 @@ struct EntryTableRow: Identifiable {
     let entry: BlockEntry
 }
 
-/// The entries a later layer displaced, with both fragments named.
+/// The entries a later layer displaced, with both fragments named. Lazy, because
+/// a store can displace tens of thousands of them.
 struct DisplacementsView: View {
     let displacements: [Displacement]
 
@@ -218,12 +225,15 @@ struct DisplacementsView: View {
             Text("A later layer won these names.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            ForEach(Array(displacements.enumerated()), id: \.offset) { pair in
-                Text(
-                    "\(pair.element.name) — \(pair.element.address) from \(pair.element.source.fragment.rawValue):\(pair.element.source.line) overridden by \(pair.element.displacedBy.fragment.rawValue):\(pair.element.displacedBy.line)"
-                )
-                .font(.callout)
-                .foregroundStyle(.secondary)
+            LazyVStack(alignment: .leading, spacing: 6) {
+                ForEach(displacements.indices, id: \.self) { index in
+                    let displaced = displacements[index]
+                    Text(
+                        "\(displaced.name) — \(displaced.address) from \(displaced.source.fragment.rawValue):\(displaced.source.line) overridden by \(displaced.displacedBy.fragment.rawValue):\(displaced.displacedBy.line)"
+                    )
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                }
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

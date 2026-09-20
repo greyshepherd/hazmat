@@ -102,4 +102,56 @@ final class ProfileLoadingTests: XCTestCase {
         XCTAssertEqual(result.orderedNames.first, "localhost")
         XCTAssertEqual(result.address(of: "api.internal", .ipv4), "127.0.0.1")
     }
+
+    // MARK: - The profile grammar's edges
+
+    /// What one line of a profile is.
+    private enum Expected {
+        case reference(String)
+        case problem(String)
+        case nothing
+    }
+
+    func testEveryEdgeLineOfAProfileIsReadAsTheGrammarSays() {
+        for (line, expected) in Self.edgeCorpus {
+            let outcome = ProfileParser.parse(line, as: work)
+            let label = "'\(line.replacingOccurrences(of: "\r", with: "\\r").replacingOccurrences(of: "\t", with: "\\t"))'"
+            switch expected {
+            case .reference(let name):
+                XCTAssertEqual(outcome.problems, [], label)
+                XCTAssertEqual(outcome.profile.references.map(\.fragment.rawValue), [name], label)
+                XCTAssertEqual(outcome.profile.references.map(\.line), [1], label)
+            case .problem(let text):
+                XCTAssertEqual(outcome.profile.references, [], label)
+                XCTAssertEqual(outcome.problems, [.malformedReference(profile: work, line: 1, text: text)], label)
+            case .nothing:
+                XCTAssertEqual(outcome.profile.references, [], label)
+                XCTAssertEqual(outcome.problems, [], label)
+            }
+        }
+    }
+
+    private static let edgeCorpus: [(String, Expected)] = [
+        ("", .nothing),
+        (" ", .nothing),
+        ("\t", .nothing),
+        ("   \t   ", .nothing),
+        ("#", .nothing),
+        ("# base", .nothing),
+        ("   # an indented comment", .nothing),
+        ("# hazmat:remove base", .nothing),
+        ("base", .reference("base")),
+        ("  base  ", .reference("base")),
+        ("\tbase\t", .reference("base")),
+        ("base # a comment", .reference("base")),
+        ("base#c", .reference("base")),
+        ("base\r", .reference("base")),
+        ("base\r\n", .reference("base")),
+        ("..escape", .problem("..escape")),
+        ("-leading", .problem("-leading")),
+        ("has space", .problem("has space")),
+        ("with/slash", .problem("with/slash")),
+        ("a..b", .problem("a..b")),
+        ("..", .problem(".."))
+    ]
 }

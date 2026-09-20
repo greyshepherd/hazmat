@@ -141,4 +141,175 @@ final class FragmentParsingTests: XCTestCase {
             )
         )
     }
+
+    // MARK: - The edge corpus
+
+    /// What one line of the hosts grammar is. The table below is the grammar's
+    /// edge corpus: it was written for the byte-level rewrite and kept as the
+    /// regression net for it.
+    private enum Expected {
+        case entry(String, [String])
+        case removal(String)
+        case problem(String, MalformedEntryDetail)
+        case nothing
+    }
+
+    func testEveryEdgeLineIsReadAsTheGrammarSays() {
+        for (line, expected) in Self.edgeCorpus {
+            let outcome = FragmentParser.parse(line, as: base)
+            let label = Self.visible(line)
+            switch expected {
+            case .entry(let address, let names):
+                XCTAssertEqual(outcome.problems, [], label)
+                XCTAssertEqual(outcome.fragment.entries.map(\.address), [address], label)
+                XCTAssertEqual(outcome.fragment.entries.first?.names, names, label)
+                XCTAssertEqual(outcome.fragment.entries.first?.source.line, 1, label)
+            case .removal(let name):
+                XCTAssertEqual(outcome.problems, [], label)
+                XCTAssertEqual(outcome.fragment.removals.map(\.name), [name], label)
+                XCTAssertEqual(outcome.fragment.entries, [], label)
+            case .problem(let text, let detail):
+                XCTAssertEqual(outcome.fragment.items, [], label)
+                XCTAssertEqual(outcome.problems.count, 1, label)
+                guard case .malformedEntry(let fragment, let number, let problemText, let problemDetail)? = outcome.problems.first else {
+                    return XCTFail("expected a malformed entry for \(label)")
+                }
+                XCTAssertEqual(fragment, base, label)
+                XCTAssertEqual(number, 1, label)
+                XCTAssertEqual(problemText, text, label)
+                XCTAssertEqual(problemDetail, detail, label)
+            case .nothing:
+                XCTAssertEqual(outcome.fragment.items, [], label)
+                XCTAssertEqual(outcome.problems, [], label)
+            }
+        }
+        XCTAssertGreaterThan(Self.edgeCorpus.count, 80, "the edge corpus shrank")
+    }
+
+    /// The same corpus read as one fragment: every answer keeps the line number
+    /// the line was written on. A line ending in a carriage return is left out,
+    /// because joining it with `\n` would make the `\r\n` pair that the byte
+    /// parser is written to split; `EdgeCaseTests` covers that separately.
+    func testTheEdgeCorpusReadAsOneFragmentKeepsItsLineNumbers() {
+        let corpus = Self.edgeCorpus.filter { !$0.0.hasSuffix("\r") }
+        let outcome = FragmentParser.parse(corpus.map(\.0).joined(separator: "\n"), as: base)
+
+        let expectedEntries = corpus.enumerated().compactMap { index, pair -> Int? in
+            guard case .entry = pair.1 else { return nil }
+            return index + 1
+        }
+        XCTAssertEqual(outcome.fragment.entries.map(\.source.line), expectedEntries)
+
+        let expectedRemovals = corpus.enumerated().compactMap { index, pair -> Int? in
+            guard case .removal = pair.1 else { return nil }
+            return index + 1
+        }
+        XCTAssertEqual(outcome.fragment.removals.map(\.source.line), expectedRemovals)
+
+        let expectedProblems = corpus.enumerated().compactMap { index, pair -> Int? in
+            guard case .problem = pair.1 else { return nil }
+            return index + 1
+        }
+        let problemLines = outcome.problems.compactMap { problem -> Int? in
+            guard case .malformedEntry(_, let number, _, _) = problem else { return nil }
+            return number
+        }
+        XCTAssertEqual(problemLines, expectedProblems)
+    }
+
+    private static func visible(_ line: String) -> String {
+        "'\(line.replacingOccurrences(of: "\r", with: "\\r").replacingOccurrences(of: "\t", with: "\\t"))'"
+    }
+
+    private static let edgeCorpus: [(String, Expected)] = [
+        ("", .nothing),
+        (" ", .nothing),
+        ("\t", .nothing),
+        ("   \t   ", .nothing),
+        ("#", .nothing),
+        ("# a comment with  trailing spaces   ", .nothing),
+        ("   # an indented comment", .nothing),
+        ("\t# tabbed comment", .nothing),
+        ("#hazmat:remove ads.example.com", .removal("ads.example.com")),
+        ("# hazmat:remove ads.example.com", .removal("ads.example.com")),
+        ("# hazmat:remove  ads.example.com", .removal("ads.example.com")),
+        ("# hazmat:remove\tads.example.com", .removal("ads.example.com")),
+        ("# hazmat:remove ads.example.com ", .removal("ads.example.com")),
+        ("# hazmat:remove ads.example.com extra", .problem("# hazmat:remove ads.example.com extra", .malformedRemovalDirective("# hazmat:remove ads.example.com extra"))),
+        ("# hazmat:remove", .problem("# hazmat:remove", .malformedRemovalDirective("# hazmat:remove"))),
+        ("# hazmat:remove bad*name", .problem("# hazmat:remove bad*name", .invalidHostName("bad*name"))),
+        ("# hazmat:remove ads.example.com # because", .problem("# hazmat:remove ads.example.com # because", .malformedRemovalDirective("# hazmat:remove ads.example.com # because"))),
+        ("# hazmat:blocklist ads.example.com", .problem("# hazmat:blocklist ads.example.com", .unknownDirective("hazmat:blocklist"))),
+        ("# hazmat:", .problem("# hazmat:", .unknownDirective("hazmat:"))),
+        ("# >>> hazmat:managed v1 >>>", .nothing),
+        ("# >>> hazmat:managed v1", .nothing),
+        ("#hazmat:unknown directive", .problem("#hazmat:unknown directive", .unknownDirective("hazmat:unknown"))),
+
+        ("0.0.0.0 zero.example", .entry("0.0.0.0", ["zero.example"])),
+        ("255.255.255.255 broadcast.example", .entry("255.255.255.255", ["broadcast.example"])),
+        ("256.0.0.1 bad.example", .problem("256.0.0.1 bad.example", .invalidAddress("256.0.0.1"))),
+        ("1.2.3 bad.example", .problem("1.2.3 bad.example", .invalidAddress("1.2.3"))),
+        ("1.2.3.4.5 bad.example", .problem("1.2.3.4.5 bad.example", .invalidAddress("1.2.3.4.5"))),
+        ("1.2.3.4 bad.example", .entry("1.2.3.4", ["bad.example"])),
+        ("010.0.0.1 leading-zero.example", .problem("010.0.0.1 leading-zero.example", .invalidAddress("010.0.0.1"))),
+        ("0.0.00.1 leading-zero.example", .problem("0.0.00.1 leading-zero.example", .invalidAddress("0.0.00.1"))),
+        ("0.0.0.01 leading-zero.example", .problem("0.0.0.01 leading-zero.example", .invalidAddress("0.0.0.01"))),
+        ("1.2.3.4", .problem("1.2.3.4", .missingName)),
+        ("not-an-address host.example", .problem("not-an-address host.example", .invalidAddress("not-an-address"))),
+        ("1.2.3.4 5.6.7.8 host.example", .entry("1.2.3.4", ["5.6.7.8", "host.example"])),
+        ("1.2.3.4\t\thost.example", .entry("1.2.3.4", ["host.example"])),
+        ("  1.2.3.4   host.example   ", .entry("1.2.3.4", ["host.example"])),
+        ("\t1.2.3.4\thost.example", .entry("1.2.3.4", ["host.example"])),
+        ("1.2.3.-1 bad.example", .problem("1.2.3.-1 bad.example", .invalidAddress("1.2.3.-1"))),
+        ("1.2.3.+1 bad.example", .problem("1.2.3.+1 bad.example", .invalidAddress("1.2.3.+1"))),
+        ("1.2.3.4. bad.example", .problem("1.2.3.4. bad.example", .invalidAddress("1.2.3.4."))),
+        ("1..3.4 bad.example", .problem("1..3.4 bad.example", .invalidAddress("1..3.4"))),
+        ("1.2.3.4#inline.example", .problem("1.2.3.4#inline.example", .missingName)),
+
+        (":: loopback", .entry("::", ["loopback"])),
+        ("::1 loopback", .entry("::1", ["loopback"])),
+        ("fe80::1%lo0 linklocal", .entry("fe80::1%lo0", ["linklocal"])),
+        ("fe80::1% linklocal", .problem("fe80::1% linklocal", .invalidAddress("fe80::1%"))),
+        ("fe80::1%lo0.eth zone.example", .entry("fe80::1%lo0.eth", ["zone.example"])),
+        ("fe80::1%lo-0_1 zone.example", .entry("fe80::1%lo-0_1", ["zone.example"])),
+        ("fe80::1%* zone.example", .problem("fe80::1%* zone.example", .invalidAddress("fe80::1%*"))),
+        ("::ffff:192.168.0.1 mapped", .entry("::ffff:192.168.0.1", ["mapped"])),
+        ("::ffff:999.168.0.1 mapped", .problem("::ffff:999.168.0.1 mapped", .invalidAddress("::ffff:999.168.0.1"))),
+        ("::ffff:1.2.3.4.5 mapped", .problem("::ffff:1.2.3.4.5 mapped", .invalidAddress("::ffff:1.2.3.4.5"))),
+        ("1::2::3 bad.example", .problem("1::2::3 bad.example", .invalidAddress("1::2::3"))),
+        ("1::2:3:4:5:6:7:8 too-many.example", .problem("1::2:3:4:5:6:7:8 too-many.example", .invalidAddress("1::2:3:4:5:6:7:8"))),
+        ("1:2:3:4:5:6:7:8 exact.example", .entry("1:2:3:4:5:6:7:8", ["exact.example"])),
+        ("1:2:3:4:5:6:7 too-few.example", .problem("1:2:3:4:5:6:7 too-few.example", .invalidAddress("1:2:3:4:5:6:7"))),
+        ("1:2:3:4:5:6:7:8:9 too-many.example", .problem("1:2:3:4:5:6:7:8:9 too-many.example", .invalidAddress("1:2:3:4:5:6:7:8:9"))),
+        ("g::1 bad.example", .problem("g::1 bad.example", .invalidAddress("g::1"))),
+        ("1:2:3:4:5:6:7:g bad.example", .problem("1:2:3:4:5:6:7:g bad.example", .invalidAddress("1:2:3:4:5:6:7:g"))),
+        ("12345::1 long-group.example", .problem("12345::1 long-group.example", .invalidAddress("12345::1"))),
+        ("2001:0db8:85a3:0000:0000:8a2e:0370:7334 long.example", .entry("2001:0db8:85a3:0000:0000:8a2e:0370:7334", ["long.example"])),
+        ("::%en0 empty-head.example", .entry("::%en0", ["empty-head.example"])),
+        (":::%en0 bad.example", .problem(":::%en0 bad.example", .invalidAddress(":::%en0"))),
+        ("1:2:3:4:5:6:1.2.3.4 embedded.example", .entry("1:2:3:4:5:6:1.2.3.4", ["embedded.example"])),
+        ("1:2:3:4:5:6:7:1.2.3.4 embedded-too-many.example", .problem("1:2:3:4:5:6:7:1.2.3.4 embedded-too-many.example", .invalidAddress("1:2:3:4:5:6:7:1.2.3.4"))),
+
+        ("127.0.0.1 dup.example dup.example", .problem("127.0.0.1 dup.example dup.example", .duplicateHostName("dup.example"))),
+        ("127.0.0.1 ok.example OK.example", .entry("127.0.0.1", ["ok.example", "OK.example"])),
+        ("127.0.0.1 bad*name", .problem("127.0.0.1 bad*name", .invalidHostName("bad*name"))),
+        ("127.0.0.1 ünicode.example", .problem("127.0.0.1 ünicode.example", .invalidHostName("ünicode.example"))),
+        ("127.0.0.1 café.example", .problem("127.0.0.1 café.example", .invalidHostName("café.example"))),
+        ("127.0.0.1 -leading.example", .entry("127.0.0.1", ["-leading.example"])),
+        ("127.0.0.1 under_score.example", .entry("127.0.0.1", ["under_score.example"])),
+        ("127.0.0.1 dot..dot.example", .entry("127.0.0.1", ["dot..dot.example"])),
+        ("127.0.0.1 a b c", .entry("127.0.0.1", ["a", "b", "c"])),
+        ("127.0.0.1 \tname.example", .entry("127.0.0.1", ["name.example"])),
+        ("127.0.0.1  ", .problem("127.0.0.1  ", .missingName)),
+        ("127.0.0.1", .problem("127.0.0.1", .missingName)),
+        ("127.0.0.1 # only a comment", .problem("127.0.0.1 # only a comment", .missingName)),
+        ("127.0.0.1#host.example", .problem("127.0.0.1#host.example", .missingName)),
+        ("127.0.0.1\thost.example # c", .entry("127.0.0.1", ["host.example"])),
+        ("127.0.0.1 host.example#c", .entry("127.0.0.1", ["host.example"])),
+
+        ("127.0.0.1 host.example\r", .entry("127.0.0.1", ["host.example"])),
+        ("127.0.0.1\rhost.example", .problem("127.0.0.1\rhost.example", .invalidAddress("127.0.0.1\rhost.example"))),
+        ("\r", .nothing),
+        ("\r127.0.0.1 host.example", .entry("127.0.0.1", ["host.example"]))
+    ]
 }

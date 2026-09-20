@@ -78,11 +78,15 @@ public struct EditorModel: Sendable {
     public let layout: StoreLayout
     public let fileURL: URL
     public let writer: PrivilegedWriter
+    /// What a read may reuse across reads. `nil` reads everything from scratch,
+    /// which is what a test that wants no reuse passes.
+    public let cache: StoreCache?
 
-    public init(storeRoot: URL, fileURL: URL, writer: PrivilegedWriter) {
+    public init(storeRoot: URL, fileURL: URL, writer: PrivilegedWriter, cache: StoreCache? = nil) {
         layout = StoreLayout(root: storeRoot)
         self.fileURL = fileURL
         self.writer = writer
+        self.cache = cache
     }
 
     private var store: DirectoryStore { DirectoryStore(root: layout.root) }
@@ -93,14 +97,16 @@ public struct EditorModel: Sendable {
     // MARK: - Reading
 
     /// Reads the store's profiles and fragments, the selected items' detail, and
-    /// what the live file holds. Nothing is cached, so a file another tool wrote
-    /// appears in the next read.
+    /// what the live file holds. Every answer comes from one reading of the
+    /// store, so a fragment is parsed once and a profile is composed and
+    /// rendered once, however many rows and views ask a question of it.
     public func read(
         selection: SidebarSelection? = nil,
         search: StoreSearch = .none
     ) -> EditorPresentation {
-        let profiles = layout.profiles()
-        let fragments = layout.fragments()
+        let reading = StoreReading(layout: layout, cache: cache)
+        let profiles = reading.profiles
+        let fragments = reading.fragments
         let matchingProfiles = search.profiles(profiles)
         let matchingFragments = search.fragments(fragments)
 
@@ -108,14 +114,14 @@ public struct EditorModel: Sendable {
         let selectedProfile = resolvedSelection.selectedProfile ?? (selection == nil ? matchingProfiles.first : nil)
         let selectedFragment = resolvedSelection.selectedFragment ?? (selection == nil ? matchingFragments.first : nil)
 
-        let selectedFragmentText = selectedFragment.flatMap { fragmentText(of: $0) } ?? ""
+        let selectedFragmentText = selectedFragment.flatMap { reading.fragment($0)?.text } ?? ""
 
         var layers: [FragmentID] = []
         var layerRows: [LayerRow] = []
-        if let selectedProfile, let text = profileText(of: selectedProfile) {
-            layers = ProfileParser.parse(text, as: selectedProfile).profile.references.map(\.fragment)
+        if let selectedProfile, let profile = reading.profile(selectedProfile) {
+            layers = profile.outcome.profile.references.map(\.fragment)
             layerRows = layers.enumerated().map { index, fragment in
-                LayerRow(fragment: fragment, position: index + 1, entryCount: entryCount(of: fragment))
+                LayerRow(fragment: fragment, position: index + 1, entryCount: Self.entryCount(of: fragment, in: reading))
             }
         }
 
@@ -123,7 +129,10 @@ public struct EditorModel: Sendable {
         let resolved: ResolvedView
         if let selectedProfile {
             do {
-                resolved = .composed(try composer.compose(profile: selectedProfile))
+                resolved = .composed(
+                    try reading.composition(of: selectedProfile),
+                    rendering: try reading.rendering(of: selectedProfile)
+                )
             } catch let error as CompositionError {
                 resolved = .unresolvable(error.problems)
             } catch {
@@ -134,7 +143,7 @@ public struct EditorModel: Sendable {
             resolved = .unresolvable([])
         }
 
-        let live = liveReading(rendering: resolved.renderedBlock, profiles: profiles)
+        let live = liveReading(reading: reading, rendering: resolved.renderedBlock, profiles: profiles)
 
         return EditorPresentation(
             storePath: layout.root.path,
@@ -145,12 +154,12 @@ public struct EditorModel: Sendable {
             profileRows: matchingProfiles.map { profile in
                 ProfileRow(
                     profile: profile,
-                    layerCount: layerCount(of: profile),
+                    layerCount: Self.layerCount(of: profile, in: reading),
                     isApplied: live.appliedProfiles.contains(profile)
                 )
             },
             fragmentRows: matchingFragments.map { fragment in
-                FragmentRow(fragment: fragment, entryCount: entryCount(of: fragment))
+                FragmentRow(fragment: fragment, entryCount: Self.entryCount(of: fragment, in: reading))
             },
             selectedProfile: selectedProfile,
             selectedFragment: selectedFragment,
@@ -161,8 +170,9 @@ public struct EditorModel: Sendable {
             layers: layers,
             layerRows: layerRows,
             resolved: resolved,
+            renderedBlock: resolved.renderedBlock,
             entryLines: resolved.composition.map(BlockRenderer.entries) ?? [],
-            usingProfiles: selectedFragment.map { profilesUsing($0, in: profiles) } ?? [],
+            usingProfiles: selectedFragment.map { Self.profiles(using: $0, in: profiles, reading: reading) } ?? [],
             appliedProfiles: live.appliedProfiles,
             live: live.state,
             storeProblem: storeProblem,
@@ -221,44 +231,32 @@ public struct EditorModel: Sendable {
         }
     }
 
-    private func fragmentText(of fragment: FragmentID) -> String? {
-        guard let text = try? store.fragment(named: fragment) else { return nil }
-        return text
-    }
-
-    private func profileText(of profile: ProfileID) -> String? {
-        guard let text = try? store.profile(named: profile) else { return nil }
-        return text
-    }
-
     /// The entries the fragment holds, as its sidebar row reports them.
-    private func entryCount(of fragment: FragmentID) -> Int {
-        guard let text = fragmentText(of: fragment) else { return 0 }
-        return FragmentParser.parse(text, as: fragment).fragment.entries.count
+    private static func entryCount(of fragment: FragmentID, in reading: StoreReading) -> Int {
+        reading.fragment(fragment)?.outcome.fragment.entries.count ?? 0
     }
 
-    private func layerCount(of profile: ProfileID) -> Int {
-        guard let text = profileText(of: profile) else { return 0 }
-        return ProfileParser.parse(text, as: profile).profile.references.count
+    private static func layerCount(of profile: ProfileID, in reading: StoreReading) -> Int {
+        reading.profile(profile)?.outcome.profile.references.count ?? 0
     }
 
-    private func profilesUsing(_ fragment: FragmentID, in profiles: [ProfileID]) -> [ProfileID] {
+    private static func profiles(using fragment: FragmentID, in profiles: [ProfileID], reading: StoreReading) -> [ProfileID] {
         profiles.filter { profile in
-            guard let text = profileText(of: profile) else { return false }
-            return ProfileParser.parse(text, as: profile).profile.references.contains { $0.fragment == fragment }
+            guard let parsed = reading.profile(profile) else { return false }
+            return parsed.outcome.profile.references.contains { $0.fragment == fragment }
         }
-    }
-
-    /// The block a profile renders, or `nil` when it cannot be resolved.
-    public func renderedBlock(of profile: ProfileID) -> Data? {
-        guard let composition = try? composer.compose(profile: profile) else { return nil }
-        return BlockRenderer.render(composition)
     }
 
     /// The live file read once, classified against the block the selected
     /// profile renders, with the profiles whose block is the live one. One read
-    /// answers both, so the sidebar's marks cost no second read.
-    private func liveReading(rendering: Data?, profiles: [ProfileID]) -> (state: LiveBlockState, appliedProfiles: [ProfileID]) {
+    /// answers both, and every profile's rendering comes from the same reading
+    /// of the store, so the sidebar's marks cost no second read and no second
+    /// parse.
+    private func liveReading(
+        reading: StoreReading,
+        rendering: Data?,
+        profiles: [ProfileID]
+    ) -> (state: LiveBlockState, appliedProfiles: [ProfileID]) {
         let live: Data
         do {
             live = try LiveHostsFile(url: fileURL).read()
@@ -280,7 +278,7 @@ public struct EditorModel: Sendable {
             return (.refused(.unsupportedVersion(found: located.version, expected: ManagedBlock.version)), [])
         }
         let block = Data(live[located.range])
-        let applied = profiles.filter { renderedBlock(of: $0) == block }
+        let applied = profiles.filter { (try? reading.rendering(of: $0)) == block }
         if let rendering, block == rendering { return (.applied, applied) }
         return (.drifted(liveBlock: block), applied)
     }

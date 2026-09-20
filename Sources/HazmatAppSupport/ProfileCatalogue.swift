@@ -5,9 +5,13 @@ import HazmatCore
 /// has no enumeration, so the shell lists the directory.
 public struct ProfileCatalogue: Sendable {
     public let layout: StoreLayout
+    /// What a derivation may reuse across reads. `nil` reads everything from
+    /// scratch.
+    public let cache: StoreCache?
 
-    public init(root: URL) {
+    public init(root: URL, cache: StoreCache? = nil) {
         layout = StoreLayout(root: root)
+        self.cache = cache
     }
 
     public var root: URL { layout.root }

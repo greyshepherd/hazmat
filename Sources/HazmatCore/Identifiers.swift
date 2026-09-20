@@ -38,17 +38,27 @@ public struct ProfileID: Hashable, Comparable, CustomStringConvertible, Sendable
 
 enum NameSyntax {
     static func isIdentifier(_ text: String) -> Bool {
-        guard let first = text.first, first.isASCII, first.isLetter || first.isNumber else { return false }
-        return text.allSatisfy(isNameCharacter) && !text.contains("..")
+        withBytes(of: text) { isIdentifier($0) }
+    }
+
+    /// `true` when the name starts with a letter or digit, contains only
+    /// `A-Z a-z 0-9 . _ -`, and holds no `..`, so it cannot leave its directory.
+    static func isIdentifier(_ bytes: UnsafeRawBufferPointer) -> Bool {
+        guard let first = bytes.first, ASCII.isLetter(first) || ASCII.isDigit(first) else { return false }
+        guard bytes.allSatisfy(isNameCharacter) else { return false }
+        return !Lines.contains(bytes, "..")
     }
 
     static func isHostName(_ text: String) -> Bool {
-        !text.isEmpty && text.allSatisfy(isNameCharacter)
+        withBytes(of: text) { isHostName($0) }
     }
 
-    private static func isNameCharacter(_ character: Character) -> Bool {
-        guard character.isASCII else { return false }
-        return character.isLetter || character.isNumber
-            || character == "." || character == "_" || character == "-"
+    static func isHostName(_ bytes: UnsafeRawBufferPointer) -> Bool {
+        !bytes.isEmpty && bytes.allSatisfy(isNameCharacter)
+    }
+
+    private static func isNameCharacter(_ byte: UInt8) -> Bool {
+        ASCII.isLetter(byte) || ASCII.isDigit(byte)
+            || byte == ASCII.dot || byte == ASCII.underscore || byte == ASCII.dash
     }
 }

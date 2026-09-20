@@ -38,22 +38,26 @@ public enum BlockSplice {
     /// something other than whitespace or a comment. The end of the file when
     /// every line is blank or a comment.
     static func firstEntryIndex(in file: Data) -> Data.Index {
-        var lineStart = file.startIndex
-        while lineStart < file.endIndex {
-            var cursor = lineStart
-            while cursor < file.endIndex, file[cursor] != 0x0A { cursor += 1 }
-            let lineEnd = cursor < file.endIndex ? cursor + 1 : cursor
-            var contentEnd = cursor
-            if contentEnd > lineStart, file[contentEnd - 1] == 0x0D { contentEnd -= 1 }
+        let offset = file.startIndex
+        let index = file.withUnsafeBytes { bytes -> Int in
+            var lineStart = 0
+            while lineStart < bytes.count {
+                var cursor = lineStart
+                while cursor < bytes.count, bytes[cursor] != ASCII.lineFeed { cursor += 1 }
+                let lineEnd = cursor < bytes.count ? cursor + 1 : cursor
+                var contentEnd = cursor
+                if contentEnd > lineStart, bytes[contentEnd - 1] == ASCII.carriageReturn { contentEnd -= 1 }
 
-            let line = file[lineStart..<contentEnd]
-            let firstContent = line.first { $0 != 0x20 && $0 != 0x09 }
-            if let firstContent, firstContent != 0x23 {
-                return lineStart
+                var index = lineStart
+                while index < contentEnd, bytes[index] == ASCII.space || bytes[index] == ASCII.tab { index += 1 }
+                if index < contentEnd, bytes[index] != ASCII.hash {
+                    return lineStart
+                }
+                lineStart = lineEnd
             }
-            lineStart = lineEnd
+            return bytes.count
         }
-        return file.endIndex
+        return offset + index
     }
 
     /// Removes the block, restoring the bytes a splice displaced. A file with no

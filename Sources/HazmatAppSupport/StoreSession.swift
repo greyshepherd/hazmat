@@ -28,27 +28,38 @@ public struct StoreSession: Sendable {
     public private(set) var root: URL
     public let fileURL: URL
     public let writer: PrivilegedWriter
+    /// What every read and derivation from this session reuses across reads. It
+    /// survives re-pointing at the same store and is left behind when the store
+    /// moves, so another store's bytes are never held.
+    public let cache: StoreCache
 
-    public init(root: URL, fileURL: URL, writer: PrivilegedWriter) {
+    public init(root: URL, fileURL: URL, writer: PrivilegedWriter, cache: StoreCache = StoreCache()) {
         self.root = root
         self.fileURL = fileURL
         self.writer = writer
+        self.cache = cache
     }
 
     public var layout: StoreLayout { StoreLayout(root: root) }
 
-    public var catalogue: ProfileCatalogue { ProfileCatalogue(root: root) }
+    public var catalogue: ProfileCatalogue { ProfileCatalogue(root: root, cache: cache) }
 
-    public var editor: EditorModel { EditorModel(storeRoot: root, fileURL: fileURL, writer: writer) }
+    public var editor: EditorModel { EditorModel(storeRoot: root, fileURL: fileURL, writer: writer, cache: cache) }
 
     public var applier: HostsFileApplier { HostsFileApplier(fileURL: fileURL, writer: writer) }
 
     public var liveFile: LiveHostsFile { LiveHostsFile(url: fileURL) }
 
     /// The same live file and writer, pointed at another store. Nothing in the
-    /// previous location is read, written, or removed.
+    /// previous location is read, written, or removed. The cache moves with the
+    /// session only when the store is the same one.
     public func repointed(to root: URL) -> StoreSession {
-        StoreSession(root: root, fileURL: fileURL, writer: writer)
+        StoreSession(
+            root: root,
+            fileURL: fileURL,
+            writer: writer,
+            cache: root == self.root ? cache : StoreCache()
+        )
     }
 }
 

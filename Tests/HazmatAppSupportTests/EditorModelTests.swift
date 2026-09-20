@@ -430,4 +430,47 @@ final class EditorModelTests: XCTestCase {
         XCTAssertFalse(outcome.didChangeTheStore)
         XCTAssertEqual(model.read().profiles, [other, work])
     }
+
+    // MARK: - 3.7 A fragment changed outside the application
+
+    /// The store is read when it is asked: a cache answers only about bytes that
+    /// came back identical, so a file another tool rewrote is read as it is now.
+    func testAFragmentChangedByAnotherToolChangesTheNextRead() throws {
+        let fixture = try stackedFixture()
+        defer { fixture.remove() }
+        let model = EditorModel(
+            storeRoot: fixture.store.root,
+            fileURL: fixture.live.url,
+            writer: UnregisteredHelper(),
+            cache: StoreCache()
+        )
+
+        let before = model.read(selection: .profile(work))
+        XCTAssertEqual(before.entryCount(of: base), 1)
+        XCTAssertEqual(before.layerRows.map(\.entryCount), [1, 1])
+        XCTAssertEqual(before.entries.map(\.name), ["localhost", "alpha.example"])
+        XCTAssertEqual(before.entryCount, 2)
+
+        // Another tool adds a line to a fragment the selected profile stacks.
+        try fixture.store.write(
+            "127.0.0.1\tlocalhost alpha.example\n::1\tbeta.example\n",
+            to: "fragments/base.hosts"
+        )
+
+        let after = model.read(selection: .profile(work))
+
+        XCTAssertNotEqual(after, before, "the read sees the bytes another tool wrote")
+        XCTAssertEqual(after.entryCount(of: base), 2, "the fragment's entry count follows the file")
+        XCTAssertEqual(after.layerRows.map(\.entryCount), [2, 1], "so does the layer row's")
+        XCTAssertEqual(after.entryCount, 3, "and so does the resolved view")
+        XCTAssertEqual(after.entries.map(\.name), ["localhost", "beta.example", "alpha.example"])
+        XCTAssertEqual(
+            after.entries.first { $0.name == "alpha.example" }?.address,
+            "10.0.0.9",
+            "the later layer still wins the name both fragments hold"
+        )
+
+        // The bytes just read are the ones the next read is answered from.
+        XCTAssertEqual(model.read(selection: .profile(work)), after)
+    }
 }

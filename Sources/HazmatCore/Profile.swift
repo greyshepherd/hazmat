@@ -1,3 +1,5 @@
+import Foundation
+
 /// An ordered stack of fragment references. Reading order is stack order.
 public struct Profile: Equatable, Sendable {
     public let id: ProfileID
@@ -65,20 +67,31 @@ public enum ProfileParser {
     }
 
     public static func parse(_ text: String, as id: ProfileID) -> Outcome {
+        withBytes(of: text) { parse($0, as: id) }
+    }
+
+    /// Reads bytes that are already in hand, so a store's file is never decoded
+    /// into a `String` only to be parsed.
+    public static func parse(_ bytes: Data, as id: ProfileID) -> Outcome {
+        bytes.withUnsafeBytes { parse($0, as: id) }
+    }
+
+    static func parse(_ bytes: UnsafeRawBufferPointer, as id: ProfileID) -> Outcome {
         var references: [ProfileReference] = []
         var problems: [CompositionProblem] = []
 
-        for (index, line) in Lines.of(text).enumerated() {
+        for (index, range) in Lines.contents(of: bytes).enumerated() {
             let lineNumber = index + 1
-            let trimmed = Lines.trimmed(line)
-            guard !trimmed.isEmpty, !trimmed.hasPrefix("#") else { continue }
+            let trimmed = Lines.trimmed(UnsafeRawBufferPointer(rebasing: bytes[range]))
+            guard !trimmed.isEmpty, trimmed[0] != ASCII.hash else { continue }
 
-            let content = Lines.trimmed(trimmed.prefix(while: { $0 != "#" }))
+            let content = Lines.trimmed(Lines.beforeComment(trimmed))
             guard !content.isEmpty else { continue }
 
-            let fragmentID = FragmentID(String(content))
+            let text = Lines.text(of: content)
+            let fragmentID = FragmentID(text)
             guard fragmentID.isValid else {
-                problems.append(.malformedReference(profile: id, line: lineNumber, text: String(content)))
+                problems.append(.malformedReference(profile: id, line: lineNumber, text: text))
                 continue
             }
             references.append(ProfileReference(fragment: fragmentID, line: lineNumber))

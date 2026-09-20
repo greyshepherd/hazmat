@@ -61,6 +61,13 @@ disk (its location is choosable in Settings), and that store, not the hosts
 file, is the source of truth. Switching profiles or turning the block off
 restores the rest of the file exactly as it was.
 
+Fragments are plain text, and a line is read the same whether it ends in `\n` or
+`\r\n`. A block of a few hundred thousand short entries fits inside the helper's
+16 MiB write bound. The store is read every time it is asked — a window refresh,
+a click on the menu bar — and what was derived from a file is reused only while
+the bytes read come back identical, so a fragment another tool changed is read
+as it is now rather than as it was.
+
 ## Requirements
 
 - A Mac with Apple silicon

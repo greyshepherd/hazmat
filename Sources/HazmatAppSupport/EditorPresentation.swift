@@ -33,14 +33,15 @@ public enum LiveBlockState: Equatable, Sendable {
 /// fragments, the entries a conflict displaced, or the problems that stopped
 /// composition.
 public enum ResolvedView: Equatable, Sendable {
-    /// The profile composed.
-    case composed(Composition)
+    /// The profile composed, with the block it renders: rendered once when the
+    /// profile was read rather than on every look at it.
+    case composed(Composition, rendering: Data)
     /// The profile cannot be resolved; it is reported rather than shown as a
     /// partial or empty result.
     case unresolvable([CompositionProblem])
 
     public var composition: Composition? {
-        guard case .composed(let composition) = self else { return nil }
+        guard case .composed(let composition, _) = self else { return nil }
         return composition
     }
 
@@ -59,7 +60,8 @@ public enum ResolvedView: Equatable, Sendable {
 
     /// The block the profile renders, or `nil` when it cannot be resolved.
     public var renderedBlock: Data? {
-        composition.map(BlockRenderer.render)
+        guard case .composed(_, let rendering) = self else { return nil }
+        return rendering
     }
 }
 
@@ -164,6 +166,9 @@ public struct EditorPresentation: Equatable, Sendable {
     public let layerRows: [LayerRow]
     /// The selected profile composed once, and rendered.
     public let resolved: ResolvedView
+    /// The block the selected profile renders, computed once by the read rather
+    /// than on every look at it.
+    public let renderedBlock: Data?
     /// The block's entry lines: one row per address line the renderer writes.
     public let entryLines: [BlockEntry]
     /// The profiles whose stack references the selected fragment.
@@ -178,7 +183,7 @@ public struct EditorPresentation: Equatable, Sendable {
     public let actions: [Action]
 
     /// The block the selected profile renders now.
-    public var rendering: Data? { resolved.renderedBlock }
+    public var rendering: Data? { renderedBlock }
 
     /// Whether the selected profile's block is the live one.
     public var isApplied: Bool { live == .applied }

@@ -44,6 +44,10 @@ let package = Package(
             dependencies: ["HazmatCore", "HazmatAppSupport", "HazmatProtocol"]
         ),
         .testTarget(
+            name: "HazmatAppTests",
+            dependencies: ["HazmatApp", "HazmatAppSupport", "HazmatCore", "HazmatProtocol"]
+        ),
+        .testTarget(
             name: "HazmatPackagingTests",
             dependencies: ["HazmatProtocol"]
         )

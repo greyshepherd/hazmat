@@ -103,4 +103,46 @@ final class EdgeCaseTests: XCTestCase {
             text(BlockRenderer.render(try composition(fragments: [("empty", "")], profile: "empty\n")))
         )
     }
+
+    // MARK: - Line endings are never part of an address or a name
+
+    func testACRLFFragmentParsesLikeItsLFTwin() {
+        let unix = "127.0.0.1\tlocalhost hazmat.local\n"
+            + "::1\tapi.internal\n"
+            + "# a comment\n"
+            + "# hazmat:remove legacy.example.com\n"
+            + "10.0.0.5\tlegacy.example.com\n"
+        let windows = unix.replacingOccurrences(of: "\n", with: "\r\n")
+        let id = FragmentID("twin")
+
+        let parsedUnix = FragmentParser.parse(unix, as: id)
+        let parsedWindows = FragmentParser.parse(windows, as: id)
+
+        XCTAssertEqual(parsedWindows.problems, [])
+        XCTAssertEqual(parsedWindows, parsedUnix, "the line ending is not part of any entry")
+        XCTAssertEqual(parsedWindows.fragment.entries.map(\.source.line), [1, 2, 5])
+        XCTAssertEqual(parsedWindows.fragment.removals.map(\.source.line), [4])
+    }
+
+    func testACRLFProfileParsesLikeItsLFTwin() {
+        let unix = "# Work machine.\nbase\nproject\n"
+        let windows = unix.replacingOccurrences(of: "\n", with: "\r\n")
+        let id = ProfileID("work")
+
+        let parsedWindows = ProfileParser.parse(windows, as: id)
+
+        XCTAssertEqual(parsedWindows, ProfileParser.parse(unix, as: id))
+        XCTAssertEqual(parsedWindows.profile.references.map(\.fragment.rawValue), ["base", "project"])
+        XCTAssertEqual(parsedWindows.profile.references.map(\.line), [2, 3])
+    }
+
+    func testTheCRLFFixtureIsReadLineByLine() throws {
+        let source = String(decoding: try Fixture.data("shipped-hosts-crlf", ext: "txt"), as: UTF8.self)
+
+        let outcome = FragmentParser.parse(source, as: FragmentID("crlf"))
+
+        XCTAssertEqual(outcome.problems, [])
+        XCTAssertEqual(outcome.fragment.entries.map(\.source.line), [7, 8, 9])
+        XCTAssertEqual(outcome.fragment.entries.map(\.address), ["127.0.0.1", "255.255.255.255", "::1"])
+    }
 }

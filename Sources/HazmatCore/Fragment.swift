@@ -1,3 +1,5 @@
+import Foundation
+
 /// Where a line came from: the fragment, and its one-based line number.
 public struct SourceLocation: Hashable, Sendable {
     public let fragment: FragmentID
@@ -90,11 +92,22 @@ public enum FragmentParser {
     }
 
     public static func parse(_ text: String, as id: FragmentID) -> Outcome {
+        withBytes(of: text) { parse($0, as: id) }
+    }
+
+    /// Reads bytes that are already in hand, so a store's file is never decoded
+    /// into a `String` only to be parsed.
+    public static func parse(_ bytes: Data, as id: FragmentID) -> Outcome {
+        bytes.withUnsafeBytes { parse($0, as: id) }
+    }
+
+    static func parse(_ bytes: UnsafeRawBufferPointer, as id: FragmentID) -> Outcome {
         var items: [FragmentItem] = []
         var problems: [CompositionProblem] = []
 
-        for (index, line) in Lines.of(text).enumerated() {
+        for (index, range) in Lines.contents(of: bytes).enumerated() {
             let lineNumber = index + 1
+            let line = UnsafeRawBufferPointer(rebasing: bytes[range])
             if let problem = parse(line, as: id, lineNumber: lineNumber, into: &items) {
                 problems.append(problem)
             }
@@ -103,7 +116,7 @@ public enum FragmentParser {
     }
 
     private static func parse(
-        _ line: String,
+        _ line: UnsafeRawBufferPointer,
         as id: FragmentID,
         lineNumber: Int,
         into items: inout [FragmentItem]
@@ -112,79 +125,198 @@ public enum FragmentParser {
         let trimmed = Lines.trimmed(line)
         guard !trimmed.isEmpty else { return nil }
 
-        if trimmed.hasPrefix("#") {
+        if trimmed[0] == ASCII.hash {
             return parseComment(trimmed, source: source, into: &items)
         }
 
-        let content = Lines.trimmed(trimmed.prefix(while: { $0 != "#" }))
+        let content = Lines.trimmed(Lines.beforeComment(trimmed))
         guard !content.isEmpty else { return nil }
 
-        let fields = content.split(whereSeparator: { $0 == " " || $0 == "\t" })
-        let address = String(fields[0])
-        guard let family = AddressSyntax.family(of: address) else {
-            return .malformedEntry(fragment: id, line: lineNumber, text: line, detail: .invalidAddress(address))
+        let fields = Lines.fields(of: content)
+        guard let family = AddressSyntax.family(of: fields[0]) else {
+            let address = Lines.text(of: fields[0])
+            return .malformedEntry(fragment: id, line: lineNumber, text: Lines.text(of: line), detail: .invalidAddress(address))
         }
         guard fields.count > 1 else {
-            return .malformedEntry(fragment: id, line: lineNumber, text: line, detail: .missingName)
+            return .malformedEntry(fragment: id, line: lineNumber, text: Lines.text(of: line), detail: .missingName)
         }
 
         var names: [String] = []
         for field in fields.dropFirst() {
-            let name = String(field)
-            guard NameSyntax.isHostName(name) else {
-                return .malformedEntry(fragment: id, line: lineNumber, text: line, detail: .invalidHostName(name))
+            guard NameSyntax.isHostName(field) else {
+                return .malformedEntry(fragment: id, line: lineNumber, text: Lines.text(of: line), detail: .invalidHostName(Lines.text(of: field)))
             }
+            let name = Lines.text(of: field)
             guard !names.contains(name) else {
-                return .malformedEntry(fragment: id, line: lineNumber, text: line, detail: .duplicateHostName(name))
+                return .malformedEntry(fragment: id, line: lineNumber, text: Lines.text(of: line), detail: .duplicateHostName(name))
             }
             names.append(name)
         }
-        items.append(.entry(HostEntry(address: address, family: family, names: names, source: source)))
+        items.append(.entry(HostEntry(address: Lines.text(of: fields[0]), family: family, names: names, source: source)))
         return nil
     }
 
     private static func parseComment(
-        _ trimmed: Substring,
+        _ trimmed: UnsafeRawBufferPointer,
         source: SourceLocation,
         into items: inout [FragmentItem]
     ) -> CompositionProblem? {
-        let comment = Lines.trimmed(trimmed.dropFirst())
-        let fields = comment.split(whereSeparator: { $0 == " " || $0 == "\t" })
-        guard let directive = fields.first, directive.hasPrefix("hazmat:") else { return nil }
+        let comment = Lines.trimmed(UnsafeRawBufferPointer(rebasing: trimmed.dropFirst()))
+        let fields = Lines.fields(of: comment)
+        guard let directive = fields.first, Lines.hasPrefix(directive, "hazmat:") else { return nil }
 
-        guard directive == "hazmat:remove", fields.count == 2 else {
-            let text = String(trimmed)
-            guard directive == "hazmat:remove" else {
-                return .malformedEntry(fragment: source.fragment, line: source.line, text: text, detail: .unknownDirective(String(directive)))
+        let directiveText = Lines.text(of: directive)
+        guard directiveText == "hazmat:remove", fields.count == 2 else {
+            let text = Lines.text(of: trimmed)
+            guard directiveText == "hazmat:remove" else {
+                return .malformedEntry(fragment: source.fragment, line: source.line, text: text, detail: .unknownDirective(directiveText))
             }
             return .malformedEntry(fragment: source.fragment, line: source.line, text: text, detail: .malformedRemovalDirective(text))
         }
 
-        let name = String(fields[1])
-        guard NameSyntax.isHostName(name) else {
-            return .malformedEntry(fragment: source.fragment, line: source.line, text: String(trimmed), detail: .invalidHostName(name))
+        guard NameSyntax.isHostName(fields[1]) else {
+            return .malformedEntry(fragment: source.fragment, line: source.line, text: Lines.text(of: trimmed), detail: .invalidHostName(Lines.text(of: fields[1])))
         }
-        items.append(.removal(Removal(name: name, source: source)))
+        items.append(.removal(Removal(name: Lines.text(of: fields[1]), source: source)))
         return nil
     }
 }
 
+/// The bytes the hosts and profile grammars are written in terms of.
+enum ASCII {
+    static let tab: UInt8 = 0x09
+    static let lineFeed: UInt8 = 0x0A
+    static let carriageReturn: UInt8 = 0x0D
+    static let space: UInt8 = 0x20
+    static let hash: UInt8 = 0x23
+    static let percent: UInt8 = 0x25
+    static let dash: UInt8 = 0x2D
+    static let dot: UInt8 = 0x2E
+    static let zero: UInt8 = 0x30
+    static let colon: UInt8 = 0x3A
+    static let underscore: UInt8 = 0x5F
+
+    static func isDigit(_ byte: UInt8) -> Bool { (0x30...0x39).contains(byte) }
+
+    static func isLetter(_ byte: UInt8) -> Bool {
+        (0x41...0x5A).contains(byte) || (0x61...0x7A).contains(byte)
+    }
+}
+
+/// Runs `body` over the text's UTF-8 bytes, without copying them when the string
+/// already holds them contiguously.
+func withBytes<T>(of text: String, _ body: (UnsafeRawBufferPointer) throws -> T) rethrows -> T {
+    if let value = try text.utf8.withContiguousStorageIfAvailable({ try body(UnsafeRawBufferPointer($0)) }) {
+        return value
+    }
+    return try Array(text.utf8).withUnsafeBytes(body)
+}
+
 enum Lines {
-    /// Splits text into lines, dropping a single trailing carriage return from
-    /// each, and keeping a final line that carries no terminator.
-    static func of(_ text: String) -> [String] {
-        guard !text.isEmpty else { return [] }
-        var lines = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-        if text.hasSuffix("\n") {
-            lines.removeLast()
+    /// The byte range of every line's content in `bytes`: lines are split at
+    /// `0x0A`, one trailing `0x0D` is dropped from each, and a final line that
+    /// carries no terminator is still a line.
+    static func contents(of bytes: UnsafeRawBufferPointer) -> [Range<Int>] {
+        guard !bytes.isEmpty else { return [] }
+        var ranges: [Range<Int>] = []
+        var lineStart = 0
+        while lineStart < bytes.count {
+            var cursor = lineStart
+            while cursor < bytes.count, bytes[cursor] != ASCII.lineFeed { cursor += 1 }
+            var contentEnd = cursor
+            if contentEnd > lineStart, bytes[contentEnd - 1] == ASCII.carriageReturn { contentEnd -= 1 }
+            ranges.append(lineStart..<contentEnd)
+            lineStart = cursor < bytes.count ? cursor + 1 : cursor
         }
-        return lines.map { $0.hasSuffix("\r") ? String($0.dropLast()) : $0 }
+        return ranges
     }
 
-    static func trimmed(_ text: String) -> Substring {
-        trimmed(text[...])
+    /// `bytes` without leading or trailing spaces, tabs and carriage returns.
+    static func trimmed(_ bytes: UnsafeRawBufferPointer) -> UnsafeRawBufferPointer {
+        var start = 0
+        var end = bytes.count
+        while start < end, isTrimmed(bytes[start]) { start += 1 }
+        while end > start, isTrimmed(bytes[end - 1]) { end -= 1 }
+        return UnsafeRawBufferPointer(rebasing: bytes[start..<end])
     }
 
+    /// `bytes` up to the first `#`, which begins an inline comment.
+    static func beforeComment(_ bytes: UnsafeRawBufferPointer) -> UnsafeRawBufferPointer {
+        guard let index = bytes.firstIndex(of: ASCII.hash) else { return bytes }
+        return UnsafeRawBufferPointer(rebasing: bytes[..<index])
+    }
+
+    /// A line's fields: runs of bytes separated by spaces and tabs. A run of
+    /// separators contributes nothing, the way `split` reads them.
+    static func fields(of bytes: UnsafeRawBufferPointer) -> [UnsafeRawBufferPointer] {
+        var fields: [UnsafeRawBufferPointer] = []
+        var index = 0
+        while index < bytes.count {
+            while index < bytes.count, isSeparator(bytes[index]) { index += 1 }
+            guard index < bytes.count else { break }
+            let start = index
+            while index < bytes.count, !isSeparator(bytes[index]) { index += 1 }
+            fields.append(UnsafeRawBufferPointer(rebasing: bytes[start..<index]))
+        }
+        return fields
+    }
+
+    /// Whether `bytes` starts with `prefix`.
+    static func hasPrefix(_ bytes: UnsafeRawBufferPointer, _ prefix: String) -> Bool {
+        var index = 0
+        for byte in prefix.utf8 {
+            guard index < bytes.count, bytes[index] == byte else { return false }
+            index += 1
+        }
+        return true
+    }
+
+    /// Whether `pattern` occurs anywhere in `bytes`.
+    static func contains(_ bytes: UnsafeRawBufferPointer, _ pattern: String) -> Bool {
+        let pattern = Array(pattern.utf8)
+        guard !pattern.isEmpty, pattern.count <= bytes.count else { return false }
+        for start in 0...(bytes.count - pattern.count) where matches(bytes, at: start, pattern) {
+            return true
+        }
+        return false
+    }
+
+    /// `bytes` split at every occurrence of `separator`, keeping the empty pieces
+    /// between and around them, the way `components(separatedBy:)` reads them.
+    static func components(of bytes: UnsafeRawBufferPointer, separatedBy separator: String) -> [UnsafeRawBufferPointer] {
+        let pattern = Array(separator.utf8)
+        var pieces: [UnsafeRawBufferPointer] = []
+        var start = 0
+        var index = 0
+        while index + pattern.count <= bytes.count {
+            if matches(bytes, at: index, pattern) {
+                pieces.append(UnsafeRawBufferPointer(rebasing: bytes[start..<index]))
+                index += pattern.count
+                start = index
+            } else {
+                index += 1
+            }
+        }
+        pieces.append(UnsafeRawBufferPointer(rebasing: bytes[start..<bytes.count]))
+        return pieces
+    }
+
+    private static func matches(_ bytes: UnsafeRawBufferPointer, at index: Int, _ pattern: [UInt8]) -> Bool {
+        var offset = 0
+        while offset < pattern.count {
+            if bytes[index + offset] != pattern[offset] { return false }
+            offset += 1
+        }
+        return true
+    }
+
+    /// A line's bytes as text, decoded only when a problem has to name them.
+    static func text(of bytes: UnsafeRawBufferPointer) -> String {
+        String(decoding: bytes, as: UTF8.self)
+    }
+
+    /// The character-level trim a profile rewrite needs, because it keeps the
+    /// slice's own indices to replace the name where it stands.
     static func trimmed(_ slice: Substring) -> Substring {
         var result = slice
         while let first = result.first, first == " " || first == "\t" || first == "\r" {
@@ -194,5 +326,13 @@ enum Lines {
             result = result.dropLast()
         }
         return result
+    }
+
+    private static func isTrimmed(_ byte: UInt8) -> Bool {
+        byte == ASCII.space || byte == ASCII.tab || byte == ASCII.carriageReturn
+    }
+
+    private static func isSeparator(_ byte: UInt8) -> Bool {
+        byte == ASCII.space || byte == ASCII.tab
     }
 }

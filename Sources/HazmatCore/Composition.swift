@@ -63,25 +63,37 @@ public struct HostsComposer: Sendable {
             problems.append(contentsOf: outcome.problems)
             layers.append(outcome.fragment)
         }
-        guard problems.isEmpty else { throw CompositionError(problems) }
+        return try Self.compose(profile: profile, layers: layers, problems: problems)
+    }
 
+    /// Composes a profile whose layers are already parsed, together with the
+    /// problems gathering them found. A caller that has read the store once
+    /// asks this rather than making the composer read it again; nothing is
+    /// resolved when a problem exists.
+    public static func compose(
+        profile: ProfileID,
+        layers: [ParsedFragment],
+        problems: [CompositionProblem] = []
+    ) throws -> Composition {
+        guard problems.isEmpty else { throw CompositionError(problems) }
         return resolve(profile: profile, layers: layers)
     }
 
-    private func resolve(profile: ProfileID, layers: [ParsedFragment]) -> Composition {
+    private static func resolve(profile: ProfileID, layers: [ParsedFragment]) -> Composition {
         struct Key: Hashable {
             let name: String
             let family: AddressFamily
         }
-        struct Winner {
-            let address: String
-            let source: SourceLocation
-            let layer: Int
-            let nameIndex: Int
-        }
 
-        var winners: [Key: Winner] = [:]
         var displacements: [Displacement] = []
+        // Every name an entry supplied, in resolution order: winning layer, then
+        // line, then the name's position within its entry. A later entry that
+        // wins a name marks the earlier one superseded rather than moving it, so
+        // the survivors are already in the order `resolved` has to be in and no
+        // sort is needed to say so.
+        var supplied: [ResolvedName] = []
+        var superseded: [Bool] = []
+        var winner: [Key: Int] = [:]
 
         for (layerIndex, fragment) in layers.enumerated() {
             for item in fragment.items {
@@ -91,47 +103,41 @@ public struct HostsComposer: Sendable {
                     // same way a host name conflict is.
                     for (nameIndex, name) in entry.names.enumerated() {
                         let key = Key(name: name, family: entry.family)
-                        if let displaced = winners[key] {
+                        if let displaced = winner[key] {
                             displacements.append(
                                 Displacement(
                                     name: name,
                                     family: entry.family,
-                                    address: displaced.address,
-                                    source: displaced.source,
+                                    address: supplied[displaced].address,
+                                    source: supplied[displaced].source,
                                     displacedBy: entry.source
                                 )
                             )
+                            superseded[displaced] = true
                         }
-                        winners[key] = Winner(
-                            address: entry.address,
-                            source: entry.source,
-                            layer: layerIndex,
-                            nameIndex: nameIndex
+                        winner[key] = supplied.count
+                        supplied.append(
+                            ResolvedName(
+                                name: name,
+                                address: entry.address,
+                                family: entry.family,
+                                source: entry.source,
+                                layer: layerIndex,
+                                nameIndex: nameIndex
+                            )
                         )
+                        superseded.append(false)
                     }
                 case .removal(let removal):
                     for family in AddressFamily.allCases {
-                        winners.removeValue(forKey: Key(name: removal.name, family: family))
+                        guard let removed = winner.removeValue(forKey: Key(name: removal.name, family: family)) else { continue }
+                        superseded[removed] = true
                     }
                 }
             }
         }
 
-        let resolved = winners
-            .map { key, winner in
-                ResolvedName(
-                    name: key.name,
-                    address: winner.address,
-                    family: key.family,
-                    source: winner.source,
-                    layer: winner.layer,
-                    nameIndex: winner.nameIndex
-                )
-            }
-            .sorted { left, right in
-                (left.layer, left.source.line, left.nameIndex) < (right.layer, right.source.line, right.nameIndex)
-            }
-
+        let resolved = supplied.indices.compactMap { superseded[$0] ? nil : supplied[$0] }
         return Composition(profile: profile, resolved: resolved, displacements: displacements)
     }
 }

@@ -22,9 +22,10 @@ public enum ByteRefusal: Error, Equatable, Sendable, CustomStringConvertible {
 /// The input contract for finished bytes: exactly one well-formed block of a
 /// supported version, inside a size bound.
 public enum PlannedBytes {
-    /// 1 MiB. The live file is a few hundred bytes; the bound exists so a client
-    /// cannot make the daemon write an arbitrarily large file.
-    public static let sizeBound = 1 << 20
+    /// 16 MiB. The live file is usually a few hundred bytes, and a block of a few
+    /// hundred thousand short entries fits well inside this; the bound exists so
+    /// a client cannot make the daemon write an arbitrarily large file.
+    public static let sizeBound = 16 << 20
 
     /// Returns the located block, or throws the reason the bytes are refused.
     public static func validate(_ bytes: Data) throws -> ManagedBlockLocation {

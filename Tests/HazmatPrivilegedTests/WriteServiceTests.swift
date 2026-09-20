@@ -77,6 +77,43 @@ final class WriteServiceTests: XCTestCase {
         XCTAssertEqual(try directory.entries(), ["hosts"])
     }
 
+    /// The bound is a ceiling, not a target: a block of a hundred thousand short
+    /// entries has to pass it, which is what makes a large store usable.
+    func testALargeBlockWithinTheBoundIsNotRefusedForItsSize() throws {
+        let block = largeBlock(entries: 100_000)
+        let planned = try BlockSplice.splice(block: block, into: live)
+
+        XCTAssertLessThan(planned.count, PlannedBytes.sizeBound)
+        XCTAssertNil(PlannedBytes.refusal(planned), "a hundred thousand entries must pass the byte contract")
+        XCTAssertEqual(service.write(bytes: planned, baselineDigest: digest), .written)
+        XCTAssertEqualBytes(try directory.contents(), planned)
+    }
+
+    func testBytesOverTheBoundAreRefusedNamingBothNumbers() throws {
+        let actual = PlannedBytes.sizeBound + 1
+        let refusal = WriteRefusal.oversized(actual: actual, bound: PlannedBytes.sizeBound)
+
+        XCTAssertEqual(
+            service.write(bytes: Data(repeating: 0x61, count: actual), baselineDigest: digest),
+            .refused(refusal)
+        )
+        XCTAssertTrue(refusal.description.contains("\(actual)"), refusal.description)
+        XCTAssertTrue(refusal.description.contains("\(PlannedBytes.sizeBound)"), refusal.description)
+        XCTAssertEqualBytes(try directory.contents(), live, "the file is unchanged")
+    }
+
+    /// A well-formed block with more entries than any hand-written fragment: the
+    /// shape that would have hit the old one-megabyte bound.
+    private func largeBlock(entries: Int) -> Data {
+        var text = ManagedBlock.startMarker() + "\n"
+        text.reserveCapacity(entries * 32)
+        for index in 0..<entries {
+            text += "10.0.0.\(index % 250 + 1) host-\(index).example.com\n"
+        }
+        text += ManagedBlock.endMarker() + "\n"
+        return bytes(text)
+    }
+
     // MARK: - Only the block may change
 
     func testRefusesBytesThatChangeTheFileOutsideTheBlock() throws {

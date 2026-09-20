@@ -27,20 +27,36 @@ public enum ManagedBlock {
     /// Finds the managed block in `file`, or returns `nil` when the file holds
     /// none. Reading reports a foreign version; refusing it is the splice's job.
     public static func locate(in file: Data) throws -> ManagedBlockLocation? {
+        // `Data`'s indices are its buffer's, so a slice keeps its own offset.
+        let offset = file.startIndex
+        return try file.withUnsafeBytes { try locate(in: $0) }?.shifted(by: offset)
+    }
+
+    /// The same search over bytes already in hand. The token is looked for as
+    /// bytes, so a file that holds no block costs one pass and no allocation,
+    /// and a line is decoded only when the token is in it.
+    static func locate(in file: UnsafeRawBufferPointer) throws -> ManagedBlockLocation? {
         var completed: ManagedBlockLocation?
         var pending: (line: Int, version: Int, range: Range<Int>)?
 
         var lineNumber = 1
-        var lineStart = file.startIndex
-        while lineStart < file.endIndex {
+        var lineStart = 0
+        while lineStart < file.count {
             var cursor = lineStart
-            while cursor < file.endIndex, file[cursor] != 0x0A { cursor += 1 }
-            let lineEnd = cursor < file.endIndex ? cursor + 1 : cursor
+            while cursor < file.count, file[cursor] != ASCII.lineFeed { cursor += 1 }
+            let lineEnd = cursor < file.count ? cursor + 1 : cursor
             var contentEnd = cursor
-            if contentEnd > lineStart, file[contentEnd - 1] == 0x0D { contentEnd -= 1 }
-            let line = String(decoding: file[lineStart..<contentEnd], as: UTF8.self)
+            if contentEnd > lineStart, file[contentEnd - 1] == ASCII.carriageReturn { contentEnd -= 1 }
             let fullRange = lineStart..<lineEnd
 
+            let content = UnsafeRawBufferPointer(rebasing: file[lineStart..<contentEnd])
+            guard Lines.contains(content, token) else {
+                lineNumber += 1
+                lineStart = lineEnd
+                continue
+            }
+
+            let line = String(decoding: content, as: UTF8.self)
             switch markerShape(of: line) {
             case .none:
                 break
@@ -119,6 +135,17 @@ public struct ManagedBlockLocation: Equatable, Sendable {
     /// The block: the start marker's first byte through the end marker's line
     /// terminator, or through the end of the file when it carries none.
     public let range: Range<Int>
+
+    /// The same location with its range moved by `offset`, for a `Data` slice
+    /// whose indices do not start at zero.
+    func shifted(by offset: Int) -> ManagedBlockLocation {
+        guard offset != 0 else { return self }
+        return ManagedBlockLocation(
+            version: version,
+            startLine: startLine,
+            range: (range.lowerBound + offset)..<(range.upperBound + offset)
+        )
+    }
 }
 
 public enum BlockError: Error, Equatable, Sendable, CustomStringConvertible {

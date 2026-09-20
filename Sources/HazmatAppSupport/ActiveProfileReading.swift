@@ -43,12 +43,14 @@ public enum ActiveProfileReading: Equatable, Sendable {
 }
 
 extension ProfileCatalogue {
-    /// Reads the live file once, renders every profile the store holds, and
-    /// derives which profile the file represents. A profile that fails to
-    /// render is reported in the derivation instead of failing the read.
+    /// Reads the live file once, renders every profile the store holds from one
+    /// reading of it, and derives which profile the file represents. A profile
+    /// that fails to render is reported in the derivation instead of failing
+    /// the read.
     public func activation(reading file: LiveFileReading) -> ActiveProfileReading {
         guard exists else { return .missingStore }
-        let profiles = profiles()
+        let store = StoreReading(layout: layout, cache: cache)
+        let profiles = store.profiles
         guard !profiles.isEmpty else { return .emptyStore }
 
         let live: Data
@@ -60,7 +62,7 @@ extension ProfileCatalogue {
 
         let renders = profiles.map { profile -> ProfileRender in
             do {
-                return ProfileRender(profile: profile, rendering: .block(try renderedBlock(for: profile)))
+                return ProfileRender(profile: profile, rendering: .block(try store.rendering(of: profile)))
             } catch {
                 return ProfileRender(profile: profile, rendering: .problem("\(error)"))
             }

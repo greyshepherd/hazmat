@@ -50,11 +50,36 @@ public enum BlockRenderer {
     /// The block uses `\n` line endings and ends with one. Names come out in
     /// resolution order, grouped on one line when a single entry supplied them.
     public static func render(_ composition: Composition) -> Data {
-        var lines = [ManagedBlock.startMarker()]
-        lines.append(contentsOf: entries(composition).map { entry in
-            "\(entry.address) \(entry.names.joined(separator: " "))"
-        })
-        lines.append(ManagedBlock.endMarker())
-        return Data((lines.joined(separator: "\n") + "\n").utf8)
+        render(entries: entries(composition))
+    }
+
+    /// The same bytes, from entry lines already in hand, so a reader that has
+    /// them does not build them a second time. A block of a hundred thousand
+    /// lines is written straight to bytes rather than through one string per
+    /// line and a join of them all.
+    public static func render(entries: [BlockEntry]) -> Data {
+        var bytes: [UInt8] = []
+        bytes.reserveCapacity(entries.count * 40)
+        append(ManagedBlock.startMarker(), to: &bytes)
+        bytes.append(ASCII.lineFeed)
+        for entry in entries {
+            append(entry.address, to: &bytes)
+            for name in entry.names {
+                bytes.append(ASCII.space)
+                append(name, to: &bytes)
+            }
+            bytes.append(ASCII.lineFeed)
+        }
+        append(ManagedBlock.endMarker(), to: &bytes)
+        bytes.append(ASCII.lineFeed)
+        return Data(bytes)
+    }
+
+    private static func append(_ text: String, to bytes: inout [UInt8]) {
+        // A native string's UTF-8 is already contiguous, so this appends it in
+        // one copy rather than a byte at a time.
+        if text.utf8.withContiguousStorageIfAvailable({ bytes.append(contentsOf: $0) }) == nil {
+            bytes.append(contentsOf: text.utf8)
+        }
     }
 }

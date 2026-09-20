@@ -75,6 +75,27 @@ enum DeleteRequest: Equatable, Sendable {
     var confirmTitle: String { "Delete" }
 }
 
+/// The store read one read asks for: the window's presentation, and the menu's
+/// derivation when it is wanted. Injectable so a test can decide when a read
+/// lands.
+typealias StoreRead = @Sendable (
+    StoreSession,
+    SidebarSelection?,
+    StoreSearch,
+    Bool
+) async -> (editor: EditorPresentation, reading: ActiveProfileReading?)
+
+/// The inputs of one read, captured as values so the read can run away from the
+/// main actor.
+private struct ReadIntent: Sendable {
+    let session: StoreSession
+    let selection: SidebarSelection?
+    let search: StoreSearch
+    /// Whether the menu's derivation is wanted. The window's own read does not
+    /// need it: nothing it shows depends on the live file's block.
+    let activation: Bool
+}
+
 /// The shell's state: the helper, the store's reading for the menu, and the
 /// editor's last read. Decisions live in app support; this holds what was read,
 /// what the window is looking at, and forwards choices.
@@ -149,6 +170,20 @@ final class ShellModel {
     /// menu bar item acts on the sidebar's selection, which only that window
     /// shows.
     @ObservationIgnored private weak var shellWindow: NSWindow?
+    /// The read the window and the menu ask for. Injectable so a test can decide
+    /// when a read lands.
+    @ObservationIgnored private let readStore: StoreRead
+    /// The last read asked for. A read whose ticket is no longer this one has
+    /// been overtaken and is dropped rather than adopted.
+    private var readTicket = 0
+
+    /// The real read: the editor's presentation, and the menu's derivation when
+    /// it is wanted, both from one session.
+    private static let storeRead: StoreRead = { session, selection, search, activation in
+        let editor = session.editor.read(selection: selection, search: search)
+        let reading = activation ? session.catalogue.activation(reading: session.liveFile) : nil
+        return (editor, reading)
+    }
 
     /// How long an answer is trusted while it says the helper is answering. A
     /// check costs a round trip that can take its whole bound when nothing
@@ -162,7 +197,8 @@ final class ShellModel {
         presence: HelperPresence? = nil,
         updates: (any UpdateChecking)? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
-        preference: StoreLocationPreference = DefaultsStoreLocationPreference()
+        preference: StoreLocationPreference = DefaultsStoreLocationPreference(),
+        read: StoreRead? = nil
     ) {
         // One client serves both, so the app opens no second path to the helper
         // when neither is given.
@@ -172,6 +208,7 @@ final class ShellModel {
         self.writer = writer
         self.presence = presence ?? client
         self.updates = updates
+        readStore = read ?? Self.storeRead
         updateAvailability = updates?.availability ?? .unavailable
         self.preference = preference
         environmentRoot = StoreLocation.environmentRoot(environment)
@@ -360,13 +397,10 @@ final class ShellModel {
         let helperState = helperState()
         if helperState != helper { helper = helperState }
 
-        let latest = session.catalogue.activation(reading: session.liveFile)
-        if latest != reading { reading = latest }
-
         let latestUpdate = updates?.availability ?? .unavailable
         if latestUpdate != updateAvailability { updateAvailability = latestUpdate }
 
-        refreshEditor()
+        read(activation: true)
         checkPresence()
     }
 
@@ -404,16 +438,51 @@ final class ShellModel {
     }
 
     private func refreshEditor() {
-        let latest = session.editor.read(
+        read(activation: false)
+    }
+
+    /// Asks for a read of the store and the live file. The inputs are captured as
+    /// values and the work runs away from the main actor, so a large store does
+    /// not hold the window; the result is adopted only when it is the latest read
+    /// asked for, so a slow read cannot land on top of a later one. `busy` is not
+    /// set: a read is not a write, and the window keeps taking selections and
+    /// keystrokes while it runs.
+    private func read(activation: Bool) {
+        readTicket += 1
+        let ticket = readTicket
+        let intent = ReadIntent(
+            session: session,
             selection: selection,
-            search: StoreSearch(text: searchText)
+            search: StoreSearch(text: searchText),
+            activation: activation
         )
-        if latest != editor { editor = latest }
+        let readStore = readStore
+        Task.detached {
+            let (presentation, latestReading) = await readStore(
+                intent.session,
+                intent.selection,
+                intent.search,
+                intent.activation
+            )
+            await MainActor.run {
+                self.adopt(presentation, latestReading, ticket: ticket)
+            }
+        }
+    }
+
+    /// Takes a read's result, unless a later read has been asked for since. The
+    /// assignments are guarded the way the synchronous read's were: an unchanged
+    /// value must not notify observers.
+    private func adopt(_ presentation: EditorPresentation, _ latestReading: ActiveProfileReading?, ticket: Int) {
+        guard ticket == readTicket else { return }
+
+        if let latestReading, latestReading != reading { reading = latestReading }
+        if presentation != editor { editor = presentation }
         // A selection the store no longer holds moves to what the read chose; a
         // selection the search hid stays as the intent, so clearing the search
         // selects it again.
-        if let effective = latest.selection, effective != selection { selection = effective }
-        adoptFragmentDraft(latest)
+        if let effective = presentation.selection, effective != selection { selection = effective }
+        adoptFragmentDraft(presentation)
     }
 
     /// Keeps the draft the user is editing, and adopts the store's text when

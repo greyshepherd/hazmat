@@ -167,15 +167,15 @@ struct FragmentEditor: View {
                     .foregroundStyle(.secondary)
             }
 
-            TextEditor(text: $model.fragmentDraft)
-                .font(.system(.body, design: .monospaced))
-                .frame(minHeight: 220)
-                .scrollContentBackground(.hidden)
-                .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
-                .overlay {
-                    RoundedRectangle(cornerRadius: 6)
-                        .strokeBorder(Color(nsColor: .separatorColor))
-                }
+            PlainTextView(text: model.fragmentDraft, isEditable: true) { text in
+                model.fragmentDraft = text
+            }
+            .frame(minHeight: 220)
+            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .overlay {
+                RoundedRectangle(cornerRadius: 6)
+                    .strokeBorder(Color(nsColor: .separatorColor))
+            }
 
             HStack(spacing: 8) {
                 Button(WindowAction.save.title) { model.saveFragment(text: model.fragmentDraft) }
