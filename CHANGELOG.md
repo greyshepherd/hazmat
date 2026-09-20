@@ -5,6 +5,28 @@ carries a higher build number than the one before it; published versions are
 never rewritten. A published version's section is what its release page carries,
 so it is not rewritten either — the next version says what changed.
 
+## 1.2.0 — 2026-09-20
+
+A store of a hundred thousand entries is usable, and the resolved block fills the
+pane it is shown in.
+
+- The size bound is 16 MiB rather than 1 MiB, parsing and block location run over
+  bytes, and a read parses each fragment once rather than once per row, layer and
+  profile. A 100,000-entry fragment now applies.
+- The store is read every time it is asked; only a derivation whose bytes come
+  back unchanged is reused.
+- Reads run off the main actor, so the window and the menu stay responsive, a slow
+  read cannot replace a later one, and a read never overwrites a draft being
+  edited.
+- The block's text view and the fragment editor lay out only what is visible, and
+  the displaced list is lazy.
+- A fragment whose lines end in `\r\n` is read line by line rather than as one
+  malformed entry.
+- The resolved block takes the height left in the pane rather than sitting at its
+  minimum with the window empty below it.
+- Publish hashes the archive the release host serves against the one built here,
+  and a script's `--help` prints its whole header.
+
 ## 1.1.0 — 2026-09-19
 
 Fragment renames that carry their references, a privileged side that checks the

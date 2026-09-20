@@ -1,6 +1,6 @@
 {
-  "shortVersion": "1.1.0",
-  "buildNumber": 3,
+  "shortVersion": "1.2.0",
+  "buildNumber": 4,
   "teamIdentifier": "BHY3LCR536",
   "update": {
     "feedURL": "https://greyshepherd.github.io/hazmat/appcast.xml",
