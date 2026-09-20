@@ -27,20 +27,28 @@ struct DetailPane: View {
 
     var body: some View {
         let editor: EditorPresentation = model.editor
-        ScrollView {
+        // A scroll view proposes no height, so the block's text view would sit at
+        // its minimum instead of taking the pane. The resolved pane is laid out
+        // directly and the block takes what is left.
+        if case .profile = editor.selection {
             VStack(alignment: .leading, spacing: 14) {
-                switch editor.selection {
-                case .profile:
-                    resolved(editor)
-                case .fragment(let fragment):
-                    usedIn(editor, fragment)
-                case nil:
-                    Text("Nothing is selected.")
-                        .foregroundStyle(.secondary)
-                }
+                resolved(editor)
             }
             .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if case .fragment(let fragment) = editor.selection {
+                        usedIn(editor, fragment)
+                    } else {
+                        Text("Nothing is selected.")
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 
@@ -103,7 +111,7 @@ struct DetailPane: View {
     private func blockText(_ editor: EditorPresentation) -> some View {
         let rendered = editor.rendering.map { String(decoding: $0, as: UTF8.self) } ?? ""
         return PlainTextView(text: rendered)
-            .frame(minHeight: 220)
+            .frame(minHeight: 220, maxHeight: .infinity)
             .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
             .overlay {
                 RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))
@@ -128,7 +136,7 @@ struct DetailPane: View {
                     .foregroundStyle(.secondary)
             }
         }
-        .frame(minHeight: 220)
+        .frame(minHeight: 220, maxHeight: .infinity)
         .onAppear { tableRows = Self.rows(of: editor) }
         .onChange(of: editor.renderedBlock) { _, _ in tableRows = Self.rows(of: editor) }
     }
@@ -213,7 +221,8 @@ struct EntryTableRow: Identifiable {
 }
 
 /// The entries a later layer displaced, with both fragments named. Lazy, because
-/// a store can displace tens of thousands of them.
+/// a store can displace tens of thousands of them, and bounded so the block above
+/// keeps the pane.
 struct DisplacementsView: View {
     let displacements: [Displacement]
 
@@ -225,16 +234,20 @@ struct DisplacementsView: View {
             Text("A later layer won these names.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
-            LazyVStack(alignment: .leading, spacing: 6) {
-                ForEach(displacements.indices, id: \.self) { index in
-                    let displaced = displacements[index]
-                    Text(
-                        "\(displaced.name) — \(displaced.address) from \(displaced.source.fragment.rawValue):\(displaced.source.line) overridden by \(displaced.displacedBy.fragment.rawValue):\(displaced.displacedBy.line)"
-                    )
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 6) {
+                    ForEach(displacements.indices, id: \.self) { index in
+                        let displaced = displacements[index]
+                        Text(
+                            "\(displaced.name) — \(displaced.address) from \(displaced.source.fragment.rawValue):\(displaced.source.line) overridden by \(displaced.displacedBy.fragment.rawValue):\(displaced.displacedBy.line)"
+                        )
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                    }
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .frame(maxHeight: 160)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }
