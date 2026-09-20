@@ -48,5 +48,5 @@
 ## 8. Closing the loop
 
 - [x] 8.1 Run `swift test` (debug) and `swift test -c release --filter ScaleTests`; verify every suite passes and every `ScaleTests` assertion from 1.2 holds.
-- [ ] 8.2 Run the app against a store holding the generated 100,000-line fragment with the helper registered: apply the profile, confirm the live file holds the block, edit one line and save (re-apply), revert, and remove the block; verify each step reports as the specs say and none of them beachballs.
+- [x] 8.2 Run the app against a store holding the generated 100,000-line fragment with the helper registered: apply the profile, confirm the live file holds the block, edit one line and save (re-apply), revert, and remove the block; verify each step reports as the specs say and none of them beachballs.
 - [x] 8.3 Note the new bound, the CRLF fix and the cache's "bytes must be identical" rule in the release notes or README wherever the previous bound was documented; verify the daemon's startup log names 16777216.
