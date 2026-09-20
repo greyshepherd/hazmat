@@ -31,7 +31,7 @@ public enum StoreWriteError: Error, Equatable, Sendable, CustomStringConvertible
     public var description: String {
         switch self {
         case .invalidName(let name):
-            return "'\(name)' is not a usable name: it must start with a letter or a digit and hold only letters, digits, '.', '_' and '-', without '..'"
+            return "'\(name)' is not a usable name. \(NameSyntax.requirement)"
         case .nameTaken(let name):
             return "the store already holds '\(name)'"
         case .missing(let name):

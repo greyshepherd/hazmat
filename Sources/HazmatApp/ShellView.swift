@@ -1,4 +1,5 @@
 import HazmatAppSupport
+import HazmatCore
 import SwiftUI
 
 /// The window: three panes at once — the store's profiles and fragments, the
@@ -116,7 +117,10 @@ private struct WindowAsks: ViewModifier {
             ) { entry in
                 TextField(entry.placeholder, text: $model.nameDraft)
                 Button(entry.confirmTitle) { model.commitNameEntry() }
+                    .disabled(!model.nameDraftIsUsable)
                 Button("Cancel", role: .cancel) { model.cancelNameEntry() }
+            } message: { _ in
+                Text(NameSyntax.requirement)
             }
     }
 

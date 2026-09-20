@@ -176,11 +176,14 @@ final class StoreAuthoringTests: XCTestCase {
         let refused: [FragmentID] = [
             FragmentID("../escape"),
             FragmentID("with/slash"),
+            FragmentID("with/slash space"),
             FragmentID("a..b"),
             FragmentID(".."),
             FragmentID(".hidden"),
             FragmentID("-dash"),
-            FragmentID("holds space"),
+            FragmentID(" leading space"),
+            FragmentID("trailing space "),
+            FragmentID("two spaces at the end  "),
             FragmentID("")
         ]
 
@@ -193,6 +196,25 @@ final class StoreAuthoringTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.layout.fragmentsDirectory.path))
         XCTAssertEqual(store.entries(), [])
+    }
+
+    func testANameWithAnInteriorSpaceIsWrittenListedAndCarriedThroughARename() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        let local = FragmentID("Local Dev")
+
+        XCTAssertEqual(try store.writer.save("127.0.0.1\tdev.local\n", asFragment: local), .wrote)
+        XCTAssertEqual(store.layout.fragments(), [local])
+        XCTAssertEqual(store.entries(), ["fragments/Local Dev.hosts"])
+
+        XCTAssertEqual(try store.writer.save("Local Dev\n", asProfile: ProfileID("Local Work")), .wrote)
+        XCTAssertEqual(store.layout.profiles(), [ProfileID("Local Work")])
+
+        let renamed = FragmentID("Local Dev Two")
+        XCTAssertEqual(try store.writer.rename(fragment: local, to: renamed), .wrote)
+        XCTAssertEqual(store.layout.fragments(), [renamed])
+        XCTAssertEqual(try store.text("fragments/Local Dev Two.hosts"), "127.0.0.1\tdev.local\n")
+        XCTAssertEqual(try store.text("profiles/Local Work.profile"), "Local Dev Two\n")
     }
 
     func testARefusedRenameOrDuplicateTargetTouchesNothing() throws {

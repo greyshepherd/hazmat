@@ -8,8 +8,9 @@ public struct FragmentID: Hashable, Comparable, CustomStringConvertible, Sendabl
 
     public var description: String { rawValue }
 
-    /// `true` when the name starts with a letter or digit, contains only
-    /// `A-Z a-z 0-9 . _ -`, and holds no `..`, so it cannot leave its directory.
+    /// `true` when the name starts with a letter or digit, holds only letters,
+    /// digits, spaces, `.`, `_` and `-`, ends with neither a space nor `..`, so
+    /// it cannot leave its directory.
     public var isValid: Bool { NameSyntax.isIdentifier(rawValue) }
 
     public static func < (left: FragmentID, right: FragmentID) -> Bool {
@@ -27,8 +28,9 @@ public struct ProfileID: Hashable, Comparable, CustomStringConvertible, Sendable
 
     public var description: String { rawValue }
 
-    /// `true` when the name starts with a letter or digit, contains only
-    /// `A-Z a-z 0-9 . _ -`, and holds no `..`, so it cannot leave its directory.
+    /// `true` when the name starts with a letter or digit, holds only letters,
+    /// digits, spaces, `.`, `_` and `-`, ends with neither a space nor `..`, so
+    /// it cannot leave its directory.
     public var isValid: Bool { NameSyntax.isIdentifier(rawValue) }
 
     public static func < (left: ProfileID, right: ProfileID) -> Bool {
@@ -36,16 +38,28 @@ public struct ProfileID: Hashable, Comparable, CustomStringConvertible, Sendable
     }
 }
 
-enum NameSyntax {
-    static func isIdentifier(_ text: String) -> Bool {
+/// The grammar a profile or fragment name follows. A name is the file it is
+/// stored as and the line a profile names it on, so it may hold a space the way
+/// a filename may, but never a path separator, `..`, leading or trailing space,
+/// or a leading `.` or `-`.
+public enum NameSyntax {
+    /// The grammar in one sentence, so the refusal a store reports and the
+    /// window that asks for a name say the same thing.
+    public static let requirement =
+        "A name starts with a letter or a digit and holds only letters, digits, spaces, '.', '_' and "
+        + "'-'; it never ends with a space and never holds '..'."
+
+    /// `true` when `text` starts with a letter or a digit, holds only letters,
+    /// digits, spaces, `.`, `_` and `-`, ends with neither a space nor `..`, so
+    /// it cannot leave its directory and a profile line can carry it.
+    public static func isIdentifier(_ text: String) -> Bool {
         withBytes(of: text) { isIdentifier($0) }
     }
 
-    /// `true` when the name starts with a letter or digit, contains only
-    /// `A-Z a-z 0-9 . _ -`, and holds no `..`, so it cannot leave its directory.
     static func isIdentifier(_ bytes: UnsafeRawBufferPointer) -> Bool {
         guard let first = bytes.first, ASCII.isLetter(first) || ASCII.isDigit(first) else { return false }
-        guard bytes.allSatisfy(isNameCharacter) else { return false }
+        guard bytes.allSatisfy(isIdentifierByte) else { return false }
+        guard bytes.last != ASCII.space else { return false }
         return !Lines.contains(bytes, "..")
     }
 
@@ -60,5 +74,11 @@ enum NameSyntax {
     private static func isNameCharacter(_ byte: UInt8) -> Bool {
         ASCII.isLetter(byte) || ASCII.isDigit(byte)
             || byte == ASCII.dot || byte == ASCII.underscore || byte == ASCII.dash
+    }
+
+    /// A hostname holds no space; a name a profile or fragment is stored under
+    /// may, so the two grammars share every character but that one.
+    private static func isIdentifierByte(_ byte: UInt8) -> Bool {
+        isNameCharacter(byte) || byte == ASCII.space
     }
 }

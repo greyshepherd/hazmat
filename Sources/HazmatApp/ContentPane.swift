@@ -155,7 +155,7 @@ struct FragmentEditor: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 240)
                     Button("Rename") { model.renameFragment(to: nameDraft) }
-                        .disabled(nameDraft == fragment.rawValue || nameDraft.isEmpty)
+                        .disabled(!NameSyntax.isIdentifier(nameDraft) || nameDraft == fragment.rawValue)
                 }
             }
             .onAppear { nameDraft = fragment.rawValue }

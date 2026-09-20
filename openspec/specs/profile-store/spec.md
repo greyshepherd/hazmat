@@ -41,12 +41,20 @@ the environment names nothing.
 ### Requirement: Names are validated before anything is written
 
 A profile or fragment name MUST start with a letter or a digit, MUST contain only
-letters, digits, `.`, `_`, and `-`, and MUST NOT contain `..`. A name outside
-that grammar MUST be refused with a reason, and no file or directory MAY be
-created, replaced, or removed for it.
+letters, digits, spaces, `.`, `_`, and `-`, MUST NOT end with a space, and MUST NOT
+contain `..`. A name outside that grammar MUST be refused with a reason, and no
+file or directory MAY be created, replaced, or removed for it.
 
 #### Scenario: A name that would leave the store
 - **WHEN** a name containing a path separator or `..` is used
+- **THEN** the operation is refused with a reason and the store is unchanged
+
+#### Scenario: A name with a space
+- **WHEN** a profile or a fragment is created, renamed, or listed under a name holding an interior space
+- **THEN** the name is taken as it stands and the file it names is the one the store reads and writes
+
+#### Scenario: A name with a space where it cannot be kept
+- **WHEN** a name carries a leading or trailing space, or any other character outside the grammar
 - **THEN** the operation is refused with a reason and the store is unchanged
 
 #### Scenario: A refused name leaves nothing behind

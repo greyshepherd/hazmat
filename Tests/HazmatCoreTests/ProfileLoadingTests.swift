@@ -37,6 +37,18 @@ final class ProfileLoadingTests: XCTestCase {
         XCTAssertEqual(result.orderedNames, ["second.example", "first.example"])
     }
 
+    func testAFragmentWhoseNameHoldsASpaceIsReferencedByName() throws {
+        let store = InMemoryStore(
+            fragments: [FragmentID("Local Dev"): "127.0.0.1\tdev.local\n"],
+            profiles: [work: "Local Dev\n"]
+        )
+
+        let result = try HostsComposer(store: store).compose(profile: work)
+
+        XCTAssertEqual(result.orderedNames, ["dev.local"])
+        XCTAssertEqual(result.orderedSources.map(\.fragment), [FragmentID("Local Dev")])
+    }
+
     func testCommentsAndBlankLinesArePermitted() throws {
         let store = InMemoryStore(
             fragments: [FragmentID("base"): "10.0.0.1 first.example\n"],
@@ -149,7 +161,11 @@ final class ProfileLoadingTests: XCTestCase {
         ("base\r\n", .reference("base")),
         ("..escape", .problem("..escape")),
         ("-leading", .problem("-leading")),
-        ("has space", .problem("has space")),
+        ("Local Dev", .reference("Local Dev")),
+        ("  Local Dev  ", .reference("Local Dev")),
+        ("Local Dev # a comment", .reference("Local Dev")),
+        ("Local Dev ", .reference("Local Dev")),
+        (" Local..Dev", .problem("Local..Dev")),
         ("with/slash", .problem("with/slash")),
         ("a..b", .problem("a..b")),
         ("..", .problem(".."))

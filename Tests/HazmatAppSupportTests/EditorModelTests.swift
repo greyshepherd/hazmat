@@ -431,6 +431,28 @@ final class EditorModelTests: XCTestCase {
         XCTAssertEqual(model.read().profiles, [other, work])
     }
 
+    func testTheModelCreatesRenamesAndDuplicatesNamesHoldingASpace() throws {
+        let fixture = try stackedFixture()
+        defer { fixture.remove() }
+        let model = fixture.model(writer: UnregisteredHelper())
+
+        let profile = ProfileID("Local Dev")
+        XCTAssertEqual(model.createProfile(named: profile.rawValue).store, .success(.wrote))
+        XCTAssertTrue(model.read().profiles.contains(profile))
+
+        let fragment = FragmentID("Local Dev Base")
+        XCTAssertEqual(model.createFragment(named: fragment.rawValue).store, .success(.wrote))
+        XCTAssertTrue(model.read().fragments.contains(fragment))
+
+        let renamed = ProfileID("Local Dev Two")
+        XCTAssertEqual(model.rename(profile: profile, to: renamed.rawValue).store, .success(.wrote))
+        XCTAssertEqual(model.read().profiles, [renamed, other, work])
+
+        let copy = FragmentID("Local Dev Base Copy")
+        XCTAssertEqual(model.duplicate(fragment: fragment, as: copy.rawValue).store, .success(.wrote))
+        XCTAssertTrue(model.read().fragments.contains(copy))
+    }
+
     // MARK: - 3.7 A fragment changed outside the application
 
     /// The store is read when it is asked: a cache answers only about bytes that

@@ -790,6 +790,13 @@ final class ShellModel {
         beginNameEntry(kind)
     }
 
+    /// Whether the field holds a name the store will take. The window disables
+    /// its confirm button while it does not, so a name that would be refused is
+    /// corrected in the field rather than dismissed and reported afterwards.
+    var nameDraftIsUsable: Bool {
+        nameEntry != nil && NameSyntax.isIdentifier(nameDraft)
+    }
+
     func commitNameEntry() {
         guard let entry = nameEntry else { return }
         let name = nameDraft
