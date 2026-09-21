@@ -71,10 +71,21 @@ final class ProfileCatalogueTests: XCTestCase {
         }
     }
 
+    func testTheRenderedDigestIsTheRenderedBlocks() throws {
+        let store = try TemporaryStore()
+        defer { store.remove() }
+        try store.write("127.0.0.1\tlocalhost\n", to: "fragments/base.hosts")
+        try store.write("base\n", to: "profiles/work.profile")
+        let catalogue = ProfileCatalogue(root: store.root, cache: StoreCache())
+
+        XCTAssertEqual(try catalogue.renderedDigest(for: ProfileID("work")), ByteDigest(try catalogue.renderedBlock(for: ProfileID("work"))))
+        XCTAssertThrowsError(try catalogue.renderedDigest(for: ProfileID("absent")))
+    }
+
     func testTheShellUsesTheProfilessRenderedBlockAndNeverTheResolvedNames() {
         let model = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellModel.swift" }?.1 ?? ""
 
-        XCTAssertTrue(model.contains("catalogue.renderedBlock(for: matched)"), model)
+        XCTAssertTrue(model.contains("catalogue.renderedDigest(for: matched)"), model)
         XCTAssertFalse(model.contains(".resolved"), model)
     }
 }

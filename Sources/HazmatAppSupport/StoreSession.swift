@@ -6,12 +6,13 @@ import HazmatCore
 /// file held none, which a revert undoes by removing the block.
 public struct ApplyRecord: Equatable, Sendable {
     public let profile: ProfileID
-    /// The block the apply wrote.
-    public let block: Data
-    /// The block the apply replaced, byte for byte.
+    /// The block the apply wrote, by its digest: a revert checks the live block
+    /// against it and writes nothing of it.
+    public let block: ByteDigest
+    /// The block the apply replaced, byte for byte: what a revert writes back.
     public let replaced: Data?
 
-    public init(profile: ProfileID, block: Data, replaced: Data?) {
+    public init(profile: ProfileID, block: ByteDigest, replaced: Data?) {
         self.profile = profile
         self.block = block
         self.replaced = replaced

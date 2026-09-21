@@ -11,7 +11,7 @@ public struct MenuPresentation: Equatable, Sendable {
         /// Replace a block that matches no profile. Deliberate: it is only ever
         /// offered as its own item, labelled with what it would write, and it
         /// names the drifted block the reading found.
-        case overwriteDrift(ProfileID, liveBlock: Data)
+        case overwriteDrift(ProfileID, block: ByteDigest)
         case turnOff
         case registerHelper
         /// Remove the registration and register the helper again.
@@ -109,7 +109,7 @@ public struct MenuPresentation: Equatable, Sendable {
         var overwrites: [Item] = []
         let broken = Set(reading.activation?.problems.map(\.profile) ?? [])
         let active = Set(reading.activation?.activeProfiles ?? [])
-        var driftedBlock: Data?
+        var driftedBlock: ByteDigest?
         if case .drifted(let block)? = reading.activation?.state {
             driftedBlock = block
         }
@@ -117,7 +117,7 @@ public struct MenuPresentation: Equatable, Sendable {
             profiles.append(items.item(profile.rawValue, .activate(profile), marked: active.contains(profile)))
             if let driftedBlock {
                 overwrites.append(
-                    items.item("Overwrite drift with '\(profile)'", .overwriteDrift(profile, liveBlock: driftedBlock))
+                    items.item("Overwrite drift with '\(profile)'", .overwriteDrift(profile, block: driftedBlock))
                 )
             }
         }

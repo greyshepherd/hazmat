@@ -62,7 +62,7 @@ extension ProfileCatalogue {
 
         let renders = profiles.map { profile -> ProfileRender in
             do {
-                return ProfileRender(profile: profile, rendering: .block(try store.rendering(of: profile)))
+                return ProfileRender(profile: profile, rendering: .block(try store.summary(of: profile).digest))
             } catch {
                 return ProfileRender(profile: profile, rendering: .problem("\(error)"))
             }

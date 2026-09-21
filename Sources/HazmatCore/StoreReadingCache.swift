@@ -5,11 +5,16 @@ import Foundation
 /// Two derivations with the same key have the same inputs, so one may answer for
 /// the other.
 public struct DerivationKey: Hashable, Sendable {
-    /// Which answer a derivation is. A composition and the rendering of it are
-    /// different answers, derived from the same inputs.
+    /// Which answer a derivation is. A composition, the summary of the block it
+    /// renders and that block's bytes are different answers, derived from the
+    /// same inputs. The summary is kept across a release; the other two are
+    /// the window's.
     public enum Kind: Hashable, Sendable {
         case composition
+        /// The rendered block's digest and entry count.
         case rendering
+        /// The rendered block's bytes.
+        case block
     }
 
     /// Where a derivation lives: one entry per profile and kind, so a cache is
@@ -42,7 +47,9 @@ public struct DerivationKey: Hashable, Sendable {
 }
 
 /// What a reading reuses across reads. A reading always reads the files it is
-/// asked about; this only answers about bytes that came back identical.
+/// asked about; this only answers about bytes whose digest came back identical.
+/// The digest is of the bytes, never of metadata, so a same-length rewrite in
+/// the same second is seen; and it is the digest that is kept, never the bytes.
 ///
 /// A generation identifies a file's bytes and changes whenever they do, so
 /// anything keyed on generations is reused exactly while its inputs are
@@ -51,15 +58,15 @@ public struct DerivationKey: Hashable, Sendable {
 /// Of each file the cache keeps two things: a summary every read wants (a
 /// fragment's entry count, a profile's parse), and — only while something has
 /// asked for it — the whole of what the bytes derived to (a fragment's parse).
-/// The parses and the compositions exist for a window that is showing them;
-/// releasing them keeps the bytes, the summaries and the renderings, which is
-/// what the menu and the schedule read.
+/// The parses, the compositions and the rendered blocks' bytes exist for a
+/// window that is showing them; releasing them keeps the digests, the counts
+/// and the block summaries, which is what the menu and the schedule read.
 public protocol StoreReadingCache: Sendable {
-    /// Records a file's bytes and answers with their generation and summary.
-    /// `derive` runs only when the recorded bytes differ from `bytes`, and what
-    /// it made is summarised by `summarise` and held whole for `parse` when
-    /// `hold` says so.
-    func file<T, S>(_ url: URL, bytes: Data, derive: () -> T, summarise: (T) -> S, hold: Bool) -> (generation: Int, summary: S)
+    /// Records a file's bytes by their digest and answers with their generation
+    /// and summary. `derive` runs only when the recorded digest differs from
+    /// `digest`, and what it made is summarised by `summarise` and held whole
+    /// for `parse` when `hold` says so.
+    func file<T, S>(_ url: URL, digest: ByteDigest, derive: () -> T, summarise: (T) -> S, hold: Bool) -> (generation: Int, summary: S)
 
     /// The whole of what `derive` makes of the file's recorded bytes: held from
     /// an earlier derive, or derived now and held.
@@ -73,7 +80,8 @@ public protocol StoreReadingCache: Sendable {
     /// being cached.
     func retainFiles(_ urls: Set<URL>)
 
-    /// Lets go of every parse and every composition, keeping the bytes, the
-    /// summaries and the renderings: what a read with no window showing needs.
-    func releaseParses()
+    /// Lets go of every parse, every composition and every rendered block's
+    /// bytes, keeping the digests, the counts and the block summaries: what a
+    /// read with no window showing needs.
+    func releaseDetail()
 }

@@ -602,7 +602,7 @@ final class StoreAuthoringTests: XCTestCase {
         defer { live.remove() }
         let before = try live.snapshot()
         XCTAssertEqual(
-            Activation.match(live: live.bytes, renders: [ProfileRender(profile: ProfileID("work"), rendering: .block(rendered))]).state,
+            Activation.match(live: live.bytes, renders: [ProfileRender(profile: ProfileID("work"), rendering: .block(ByteDigest(rendered)))]).state,
             .active([ProfileID("work")])
         )
 
@@ -611,7 +611,7 @@ final class StoreAuthoringTests: XCTestCase {
         XCTAssertEqual(try live.snapshot(), before)
         XCTAssertEqual(
             Activation.match(live: try LiveHostsFile(url: live.url).read(), renders: []).state,
-            .drifted(liveBlock: rendered),
+            .drifted(ByteDigest(rendered)),
             "the block the deleted profile left behind is drift"
         )
     }

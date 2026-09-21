@@ -29,8 +29,9 @@ public struct ProfileReading: Equatable, Sendable {
 /// per reading rather than once per view.
 ///
 /// With a cache, a derivation is reused across readings as well — but only when
-/// the bytes read are byte-identical to the ones it was derived from. The files
-/// themselves are read every time, because a store is read when it is asked.
+/// the bytes read are byte-identical to the ones it was derived from, which
+/// their digest says. The files themselves are read every time, because a
+/// store is read when it is asked; their bytes live as long as the reading.
 ///
 /// A file the reading could not read is absent, the same answer as a store that
 /// does not hold it.
@@ -77,8 +78,8 @@ public struct StoreReading: Sendable {
         for id in profiles {
             let url = layout.profileURL(id)
             listed.insert(url)
-            guard let bytes = try? Data(contentsOf: url) else { continue }
-            let cached = cache?.file(url, bytes: bytes, derive: { parseProfile(bytes, id) }, summarise: { $0 }, hold: false)
+            guard let bytes = try? FileBytes.read(url) else { continue }
+            let cached = cache?.file(url, digest: ByteDigest(bytes), derive: { parseProfile(bytes, id) }, summarise: { $0 }, hold: false)
             profileGenerations[id] = cached?.generation ?? 0
             profileReadings[id] = ProfileReading(id: id, bytes: bytes, outcome: cached?.summary ?? parseProfile(bytes, id))
         }
@@ -92,13 +93,13 @@ public struct StoreReading: Sendable {
         for id in fragments {
             let url = layout.fragmentURL(id)
             listed.insert(url)
-            guard let bytes = try? Data(contentsOf: url) else { continue }
+            guard let bytes = try? FileBytes.read(url) else { continue }
             fragmentBytes[id] = bytes
             let entryCount: Int
             if let cache {
                 let cached = cache.file(
                     url,
-                    bytes: bytes,
+                    digest: ByteDigest(bytes),
                     derive: { parseFragment(bytes, id) },
                     summarise: { $0.fragment.entryCount },
                     hold: stacked.contains(id)
@@ -155,10 +156,18 @@ public struct StoreReading: Sendable {
         try box.composition(of: profile)
     }
 
-    /// The block the profile renders. Rendered once per reading, and once across
-    /// readings while its inputs are unchanged.
+    /// The block the profile renders, as bytes. Rendered once per reading, and
+    /// held across readings only while a window is asking for it: the bytes are
+    /// what the window shows, and a release lets them go.
     public func rendering(of profile: ProfileID) throws -> Data {
         try box.rendering(of: profile)
+    }
+
+    /// The block the profile renders, as its digest and entry count: what the
+    /// menu compares and what an apply would count. Held across readings while
+    /// the profile's inputs are unchanged, whether or not the bytes are.
+    public func summary(of profile: ProfileID) throws -> BlockSummary {
+        try box.summary(of: profile)
     }
 }
 
@@ -180,6 +189,7 @@ private final class Box: @unchecked Sendable {
     private var parses: [FragmentID: FragmentParser.Outcome]
     private var compositions: [ProfileID: Composition] = [:]
     private var renderings: [ProfileID: Data] = [:]
+    private var summaries: [ProfileID: BlockSummary] = [:]
 
     init(
         fragments: [FragmentID: FragmentReading],
@@ -235,19 +245,51 @@ private final class Box: @unchecked Sendable {
         return stored
     }
 
+    /// The bytes are held by the cache only when asked for this way: a window
+    /// asking for them holds them until a release, and a summary asked for
+    /// with no window showing renders them for this reading alone. Bytes that
+    /// were rendered leave their summary behind, so a release costs the next
+    /// read no render.
     func rendering(of profile: ProfileID) throws -> Data {
+        let rendering: Data
+        if let cache, let key = derivationKey(for: profile, kind: .block) {
+            rendering = try cache.derived(key) { try render(profile) }
+        } else {
+            rendering = try render(profile)
+        }
+        _ = try summary(of: profile)
+        return rendering
+    }
+
+    func summary(of profile: ProfileID) throws -> BlockSummary {
+        lock.lock()
+        let done = summaries[profile]
+        lock.unlock()
+        if let done { return done }
+
+        let derive = { BlockSummary(rendering: try self.render(profile)) }
+        let summary: BlockSummary
+        if let cache, let key = derivationKey(for: profile, kind: .rendering) {
+            summary = try cache.derived(key, derive: derive)
+        } else {
+            summary = try derive()
+        }
+
+        lock.lock()
+        let stored = summaries[profile] ?? summary
+        summaries[profile] = stored
+        lock.unlock()
+        return stored
+    }
+
+    /// Rendered once per reading, whoever asks first.
+    private func render(_ profile: ProfileID) throws -> Data {
         lock.lock()
         let done = renderings[profile]
         lock.unlock()
         if let done { return done }
 
-        let derive = { BlockRenderer.render(try self.composition(of: profile)) }
-        let rendering: Data
-        if let cache, let key = derivationKey(for: profile, kind: .rendering) {
-            rendering = try cache.derived(key, derive: derive)
-        } else {
-            rendering = try derive()
-        }
+        let rendering = BlockRenderer.render(try composition(of: profile))
 
         lock.lock()
         let stored = renderings[profile] ?? rendering

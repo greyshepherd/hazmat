@@ -61,7 +61,7 @@ final class RemoteEndToEndTests: XCTestCase {
         model.confirm()
         await settle { !model.busy && writer.writes == 1 }
         let appliedBlock = try world.rendered(world.work)
-        XCTAssertEqual(model.editor.liveBlock, appliedBlock)
+        XCTAssertEqual(model.editor.liveBlock, ByteDigest(appliedBlock))
         XCTAssertTrue(model.editor.isApplied)
         let shipped = try BlockSplice.strip(from: Data(contentsOf: world.liveURL))
         XCTAssertEqual(shipped, Data("127.0.0.1\tlocalhost\n".utf8))

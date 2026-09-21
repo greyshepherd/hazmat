@@ -158,7 +158,7 @@ extension EditorPresentation {
                 remedy: nil
             )
         }
-        guard rendering != nil else {
+        guard renderedDigest != nil else {
             let reason = problems.isEmpty
                 ? "'\(selectedProfile)' cannot be resolved."
                 : problems.map(\.message).joined(separator: " ")

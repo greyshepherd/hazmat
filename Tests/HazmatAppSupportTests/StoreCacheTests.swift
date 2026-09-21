@@ -107,11 +107,11 @@ final class StoreCacheTests: XCTestCase {
 
     // MARK: - Parses are held only while the window needs them
 
-    /// A read the menu asks for — counts and renderings, no composition — parses
-    /// nothing after a release while the bytes are unchanged: the renderings and
-    /// the counts are kept, the parses are not. A read that composes parses
-    /// again, once per layer.
-    func testReleasingTheParsesKeepsTheCountsAndRenderings() throws {
+    /// A read the menu asks for — counts and block summaries, no composition —
+    /// parses nothing after a release while the bytes are unchanged: the
+    /// summaries and the counts are kept, the parses are not. A read that
+    /// composes parses again, once per layer.
+    func testReleasingTheDetailKeepsTheCountsAndSummaries() throws {
         let store = try makeStore()
         defer { store.remove() }
         let cache = StoreCache()
@@ -120,7 +120,7 @@ final class StoreCacheTests: XCTestCase {
         read(store, cache, tally)
         XCTAssertEqual(tally.fragments, 3)
 
-        cache.releaseParses()
+        cache.releaseDetail()
 
         let menuRead = StoreReading(layout: StoreLayout(root: store.root), cache: cache, parseFragment: { bytes, id in
             tally.countFragment()
@@ -130,15 +130,44 @@ final class StoreCacheTests: XCTestCase {
             _ = menuRead.fragment(fragment)?.entryCount
         }
         for profile in menuRead.profiles {
-            _ = try menuRead.rendering(of: profile)
+            _ = try menuRead.summary(of: profile)
         }
-        XCTAssertEqual(tally.fragments, 3, "counts and renderings are answered without a parse")
+        XCTAssertEqual(tally.fragments, 3, "counts and summaries are answered without a parse")
         XCTAssertEqual(menuRead.fragment(base)?.entryCount, 1)
 
         read(store, cache, tally)
         XCTAssertEqual(tally.fragments, 6, "composing again parses each stacked fragment once")
         read(store, cache, tally)
         XCTAssertEqual(tally.fragments, 6, "and holds them until the next release")
+    }
+
+    /// The rendered bytes are the window's: a read that composes holds them,
+    /// a release lets them go, and the summary — digest and count — stays to
+    /// answer the menu without a parse or a render.
+    func testAReleaseLetsTheRenderedBytesGoAndKeepsTheirSummary() throws {
+        let store = try makeStore()
+        defer { store.remove() }
+        let cache = StoreCache()
+        let tally = ParseTally()
+
+        let full = read(store, cache, tally)
+        let rendering = try full.rendering(of: work)
+        XCTAssertEqual(try full.summary(of: work), BlockSummary(rendering: rendering))
+        XCTAssertEqual(Set(cache.derivationKeys.map(\.kind)), [.composition, .rendering, .block])
+
+        cache.releaseDetail()
+
+        XCTAssertEqual(Set(cache.derivationKeys.map(\.kind)), [.rendering], "the summaries stay; the bytes and the compositions go")
+        let menuRead = StoreReading(layout: StoreLayout(root: store.root), cache: cache, parseFragment: { bytes, id in
+            tally.countFragment()
+            return FragmentParser.parse(bytes, as: id)
+        }, parseProfile: { bytes, id in ProfileParser.parse(bytes, as: id) })
+        XCTAssertEqual(try menuRead.summary(of: work), BlockSummary(rendering: rendering))
+        XCTAssertEqual(tally.fragments, 3, "the summary is answered from the cache")
+        XCTAssertEqual(Set(cache.derivationKeys.map(\.kind)), [.rendering], "asking for a summary holds no bytes")
+
+        XCTAssertEqual(try menuRead.rendering(of: work), rendering)
+        XCTAssertTrue(cache.derivationKeys.contains { $0.kind == .block }, "asking for the bytes holds them again")
     }
 
     /// A fragment no profile stacks is parsed once for its count and not held;

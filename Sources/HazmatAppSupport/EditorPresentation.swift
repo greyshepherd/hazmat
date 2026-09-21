@@ -9,13 +9,15 @@ public enum LiveBlockState: Equatable, Sendable {
     case absent
     /// The file holds the block the selected profile renders now.
     case applied
-    /// The file holds a well-formed block that differs from the rendering.
-    case drifted(liveBlock: Data)
+    /// The file holds a well-formed block that differs from the rendering,
+    /// named by its digest.
+    case drifted(ByteDigest)
     /// The markers cannot be read as one supported block.
     case refused(BlockError)
 
-    /// The block the file holds, when it holds a readable one.
-    public var liveBlock: Data? {
+    /// The digest of the block the file holds, when it holds one no profile
+    /// renders.
+    public var liveBlock: ByteDigest? {
         guard case .drifted(let block) = self else { return nil }
         return block
     }
@@ -36,11 +38,12 @@ public enum ResolvedView: Equatable, Sendable {
     /// The profile composed, with the block it renders: rendered once when the
     /// profile was read rather than on every look at it.
     case composed(Composition, rendering: Data)
-    /// The block the profile renders, without the composition it came from:
-    /// what a read keeps when no window is showing the composition. The block
-    /// is what the menu compares with the live file; the composition of a large
-    /// profile is what the panes cost.
-    case rendered(Data)
+    /// The block the profile renders, by its digest and entry count, without
+    /// the composition or the bytes: what a read keeps when no window is
+    /// showing them. The digest is what the menu compares with the live file;
+    /// the composition and the bytes of a large profile are what the panes
+    /// cost.
+    case rendered(BlockSummary)
     /// The profile cannot be resolved; it is reported rather than shown as a
     /// partial or empty result.
     case unresolvable([CompositionProblem])
@@ -63,13 +66,12 @@ public enum ResolvedView: Equatable, Sendable {
         return problems
     }
 
-    /// The block the profile renders, or `nil` when it cannot be resolved.
+    /// The block the profile renders, when the read carried its bytes.
     public var renderedBlock: Data? {
-        switch self {
-        case .composed(_, let rendering), .rendered(let rendering): return rendering
-        case .unresolvable: return nil
-        }
+        guard case .composed(_, let rendering) = self else { return nil }
+        return rendering
     }
+
 }
 
 /// A profile as a sidebar row: how many layers it stacks, and whether its block
@@ -185,7 +187,7 @@ public struct EditorPresentation: Equatable, Sendable {
         case removeLayer(ProfileID, index: Int)
         case moveLayer(ProfileID, from: Int, to: Int)
         case applyProfile(ProfileID)
-        case overwriteDrift(ProfileID, liveBlock: Data)
+        case overwriteDrift(ProfileID, block: ByteDigest)
         /// Fetches the source now, whatever its interval says.
         case refreshSource(FragmentID)
     }
@@ -245,9 +247,12 @@ public struct EditorPresentation: Equatable, Sendable {
     /// composition and the selected fragment's text — or was read for a window
     /// that is not showing.
     public let hasDetail: Bool
-    /// The block the selected profile renders, computed once by the read rather
-    /// than on every look at it.
+    /// The block the selected profile renders, when the read carried its
+    /// bytes: computed once by the read rather than on every look at it.
     public let renderedBlock: Data?
+    /// The digest of the block the selected profile renders, whether or not
+    /// the read carried its bytes; `nil` when it cannot be resolved.
+    public let renderedDigest: ByteDigest?
     /// How many entries the block would hold: one per address line. Counted by
     /// the read; the lines themselves are built only when something asks.
     public let entryCount: Int
@@ -255,10 +260,10 @@ public struct EditorPresentation: Equatable, Sendable {
     public let usingProfiles: [ProfileID]
     /// The profiles whose rendering is the live block.
     public let appliedProfiles: [ProfileID]
-    /// The block the live file holds, when it holds a readable one. The selected
-    /// profile's rendering is `renderedBlock`; this is the file's own block,
-    /// which every profile in `appliedProfiles` renders.
-    public let liveBlock: Data?
+    /// The digest of the block the live file holds, when it holds a readable
+    /// one. The selected profile's rendering is `renderedDigest`; this names
+    /// the file's own block, which every profile in `appliedProfiles` renders.
+    public let liveBlock: ByteDigest?
     /// What the live file holds for the selected profile's block.
     public let live: LiveBlockState
     /// Why the store could not be read, when it could not.
@@ -269,7 +274,8 @@ public struct EditorPresentation: Equatable, Sendable {
     /// fragment other than the selected one is answered from the same read.
     let fragmentUsers: [FragmentID: [ProfileID]]
 
-    /// The block the selected profile renders now.
+    /// The block the selected profile renders now, when the read carried its
+    /// bytes.
     public var rendering: Data? { renderedBlock }
 
     /// Whether the selected profile's block is the live one.
@@ -323,5 +329,17 @@ public struct EditorPresentation: Equatable, Sendable {
     /// The profiles whose stack references the given fragment, in name order.
     public func stacks(_ fragment: FragmentID) -> [ProfileID] {
         fragmentUsers[fragment] ?? []
+    }
+}
+
+/// One read's two answers: the window's presentation and the menu's
+/// derivation, from one reading of the store and one read of the live file.
+public struct EditorReading: Equatable, Sendable {
+    public let presentation: EditorPresentation
+    public let activation: ActiveProfileReading
+
+    public init(presentation: EditorPresentation, activation: ActiveProfileReading) {
+        self.presentation = presentation
+        self.activation = activation
     }
 }

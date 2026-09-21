@@ -1,8 +1,9 @@
 import Foundation
 
-/// The block a profile renders now, or the problem that stopped it rendering.
+/// The block a profile renders now, named by its digest, or the problem that
+/// stopped it rendering.
 public enum ProfileRendering: Equatable, Sendable {
-    case block(Data)
+    case block(ByteDigest)
     case problem(String)
 }
 
@@ -35,9 +36,9 @@ public enum ActiveProfileState: Equatable, Sendable {
     /// The markers cannot be read as one supported block.
     case unreadable(BlockError)
     /// The block is well-formed and matches no profile's rendering. It carries
-    /// the live block, so a deliberate overwrite names the bytes it replaces
-    /// rather than locating them a second time.
-    case drifted(liveBlock: Data)
+    /// the live block's digest, so a deliberate overwrite names the block it
+    /// replaces without holding its bytes.
+    case drifted(ByteDigest)
     /// The profiles whose rendering is byte-identical to the live block.
     case active([ProfileID])
 }
@@ -48,10 +49,14 @@ public enum ActiveProfileState: Equatable, Sendable {
 public struct ActiveProfile: Equatable, Sendable {
     public let state: ActiveProfileState
     public let problems: [ProfileRenderProblem]
+    /// The digest of the block the file holds, when it holds a readable one:
+    /// the block the active profiles render, or the drifted one.
+    public let liveBlock: ByteDigest?
 
-    public init(state: ActiveProfileState, problems: [ProfileRenderProblem] = []) {
+    public init(state: ActiveProfileState, problems: [ProfileRenderProblem] = [], liveBlock: ByteDigest? = nil) {
         self.state = state
         self.problems = problems
+        self.liveBlock = liveBlock
     }
 
     /// The profiles whose rendering matches the live block, empty for every
@@ -99,11 +104,11 @@ public enum Activation {
             )
         }
 
-        let block = Data(live[location.range])
+        let block = ByteDigest(live[location.range])
         let matched = renders
             .filter { $0.rendering == .block(block) }
             .map(\.profile)
             .sorted()
-        return ActiveProfile(state: matched.isEmpty ? .drifted(liveBlock: block) : .active(matched), problems: problems)
+        return ActiveProfile(state: matched.isEmpty ? .drifted(block) : .active(matched), problems: problems, liveBlock: block)
     }
 }

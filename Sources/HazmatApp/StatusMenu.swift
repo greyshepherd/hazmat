@@ -54,7 +54,7 @@ struct StatusMenu: View {
         case .activate(let profile):
             model.activate(profile)
         case .overwriteDrift(let profile, let block):
-            model.overwriteDrift(with: profile, liveBlock: block)
+            model.overwriteDrift(with: profile, block: block)
         case .turnOff:
             model.removeBlock()
         case .registerHelper:

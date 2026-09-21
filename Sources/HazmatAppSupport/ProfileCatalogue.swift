@@ -28,4 +28,12 @@ public struct ProfileCatalogue: Sendable {
         let composition = try HostsComposer(store: DirectoryStore(root: layout.root)).compose(profile: profile)
         return BlockRenderer.render(composition)
     }
+
+    /// The digest of the block the profile renders now, from a reading of the
+    /// store: answered by the cache without a parse or a render while the
+    /// profile's bytes and its layers' are unchanged, and holding no bytes
+    /// either way.
+    public func renderedDigest(for profile: ProfileID) throws -> ByteDigest {
+        try StoreReading(layout: layout, cache: cache).summary(of: profile).digest
+    }
 }

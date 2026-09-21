@@ -285,7 +285,7 @@ final class ShellIsolationTests: XCTestCase {
         XCTAssertTrue(status.contains("model.requestRevert()"), status)
 
         let menu = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "StatusMenu.swift" }?.1 ?? ""
-        XCTAssertTrue(menu.contains("model.overwriteDrift(with: profile, liveBlock: block)"), menu)
+        XCTAssertTrue(menu.contains("model.overwriteDrift(with: profile, block: block)"), menu)
     }
 
     /// The menu bar scene renders the presentation; it does not name labels,

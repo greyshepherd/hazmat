@@ -138,7 +138,7 @@ final class MenuPresentationTests: XCTestCase {
     func testADriftedBlockReportsDriftAndOffersLabelledOverwrites() {
         let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
         let menu = MenuPresentation(
-            reading: derived([ads, work], .drifted(liveBlock: block)),
+            reading: derived([ads, work], .drifted(ByteDigest(block))),
             helper: .enabled,
             notice: .quiet
         )
@@ -148,7 +148,7 @@ final class MenuPresentationTests: XCTestCase {
         XCTAssertEqual(titles(menu, "overwrite"), ["Overwrite drift with 'ads'", "Overwrite drift with 'work'"])
         XCTAssertEqual(
             menuItem(menu, titled: "Overwrite drift with 'work'")?.action,
-            .overwriteDrift(work, liveBlock: block)
+            .overwriteDrift(work, block: ByteDigest(block))
         )
         XCTAssertTrue(
             lines(menu).contains(where: { $0.contains("matches no profile") }),
@@ -306,7 +306,7 @@ final class MenuPresentationTests: XCTestCase {
     func testEveryOverwriteIsLabelledAndNamesTheProfileItWouldWrite() {
         let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
         let menu = MenuPresentation(
-            reading: derived([ads, work], .drifted(liveBlock: block)),
+            reading: derived([ads, work], .drifted(ByteDigest(block))),
             helper: .enabled,
             notice: .quiet
         )
@@ -329,22 +329,22 @@ final class MenuPresentationTests: XCTestCase {
     func testTheOverwriteCarriesTheBlockTheDerivationFound() {
         let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
         let menu = MenuPresentation(
-            reading: derived([ads, work], .drifted(liveBlock: block)),
+            reading: derived([ads, work], .drifted(ByteDigest(block))),
             helper: .enabled,
             notice: .quiet
         )
 
-        XCTAssertEqual(menuItem(menu, titled: "Overwrite drift with 'work'")?.action, .overwriteDrift(work, liveBlock: block))
+        XCTAssertEqual(menuItem(menu, titled: "Overwrite drift with 'work'")?.action, .overwriteDrift(work, block: ByteDigest(block)))
         XCTAssertEqual(
             menuItem(menu, titled: "Overwrite drift with 'ads'")?.action,
-            .overwriteDrift(ads, liveBlock: block)
+            .overwriteDrift(ads, block: ByteDigest(block))
         )
     }
 
     func testABareProfileNameIsASwitchAndNeverAnOverwrite() {
         let block = bytes("# >>> hazmat:managed v1 >>>\n10.1.2.3 stranger.example\n# <<< hazmat:managed v1 <<<\n")
         let menu = MenuPresentation(
-            reading: derived([ads, work], .drifted(liveBlock: block)),
+            reading: derived([ads, work], .drifted(ByteDigest(block))),
             helper: .enabled,
             notice: .quiet
         )

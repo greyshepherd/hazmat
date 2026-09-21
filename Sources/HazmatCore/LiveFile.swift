@@ -40,8 +40,10 @@ public struct LiveHostsFile: Sendable {
 
     /// Reads the file now. Nothing is cached: every decision starts from these
     /// bytes, so a change made by another tool is seen rather than remembered.
+    /// Read into pages of its own, so a file read on every refresh leaves no
+    /// freed block behind each time.
     public func read() throws -> Data {
-        try Data(contentsOf: url)
+        try FileBytes.read(url)
     }
 
     public func state(rendered: Data) throws -> BlockState {

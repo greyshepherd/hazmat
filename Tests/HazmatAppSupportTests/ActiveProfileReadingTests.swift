@@ -3,29 +3,6 @@ import HazmatCore
 import XCTest
 @testable import HazmatAppSupport
 
-/// A live file standing in for the real one, counting what was asked of it.
-private final class CountingFile: LiveFileReading, @unchecked Sendable {
-    private let contents: Data
-    private let failure: Error?
-    private(set) var reads = 0
-
-    init(_ contents: Data) {
-        self.contents = contents
-        failure = nil
-    }
-
-    init(failing error: Error) {
-        contents = Data()
-        failure = error
-    }
-
-    func read() throws -> Data {
-        reads += 1
-        if let failure { throw failure }
-        return contents
-    }
-}
-
 private struct UnreadableFile: Error {}
 
 final class ActiveProfileReadingTests: XCTestCase {
@@ -72,7 +49,7 @@ final class ActiveProfileReadingTests: XCTestCase {
 
         let reading = catalogue.activation(reading: CountingFile(stranger))
 
-        XCTAssertEqual(reading.activation?.state, .drifted(liveBlock: stranger))
+        XCTAssertEqual(reading.activation?.state, .drifted(ByteDigest(stranger)))
     }
 
     // MARK: - 2.2 A missing or empty store is its own result
@@ -164,15 +141,15 @@ final class ActiveProfileReadingTests: XCTestCase {
         let menu = MenuPresentation(reading: reading, helper: .enabled, notice: .quiet)
         let item = menu.sections.flatMap(\.items).first { $0.title == "Overwrite drift with 'work'" }
 
-        XCTAssertEqual(found, stranger)
-        XCTAssertEqual(item?.action, .overwriteDrift(work, liveBlock: found))
+        XCTAssertEqual(found, ByteDigest(stranger))
+        XCTAssertEqual(item?.action, .overwriteDrift(work, block: found))
     }
 
     func testOnlyABlockThatBelongsToAProfileMayBeReplacedAsASwitch() {
         let work = ProfileID("work")
 
         XCTAssertTrue(derived([work], .active([work])).replacingIsASwitch)
-        XCTAssertFalse(derived([work], .drifted(liveBlock: Data("x".utf8))).replacingIsASwitch)
+        XCTAssertFalse(derived([work], .drifted(ByteDigest(Data("x".utf8)))).replacingIsASwitch)
         XCTAssertFalse(derived([work], .off).replacingIsASwitch)
         XCTAssertFalse(derived([work], .unreadable(.unterminatedBlock(line: 1))).replacingIsASwitch)
         XCTAssertFalse(ActiveProfileReading.missingStore.replacingIsASwitch)

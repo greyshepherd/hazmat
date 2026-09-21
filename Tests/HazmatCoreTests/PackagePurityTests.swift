@@ -3,8 +3,11 @@ import Foundation
 import XCTest
 
 /// The core is plain Swift: no UI framework, no privileged framework, and
-/// nothing that only works as root.
+/// nothing that only works as root. CryptoKit is allowed for what it is — a
+/// digest is computation, and the daemon links it as readily as the app.
 final class PackagePurityTests: XCTestCase {
+    private let allowedImports: Set<String> = ["Foundation", "CryptoKit"]
+
     func testLibraryTargetImportsNothingOutsideFoundation() throws {
         let sources = try librarySources()
         XCTAssertFalse(sources.isEmpty, "the library target has no sources")
@@ -15,7 +18,7 @@ final class PackagePurityTests: XCTestCase {
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
                 guard trimmed.hasPrefix("import ") else { continue }
                 let module = trimmed.dropFirst("import ".count).trimmingCharacters(in: .whitespaces)
-                if module != "Foundation" {
+                if !allowedImports.contains(module) {
                     offending.append("\(file): import \(module)")
                 }
             }

@@ -219,3 +219,29 @@ final class StoreFixture {
         live.remove()
     }
 }
+
+/// A live file standing in for the real one, counting what was asked of it.
+final class CountingFile: LiveFileReading, @unchecked Sendable {
+    private let contents: Data
+    private let failure: Error?
+    private let lock = NSLock()
+    private var count = 0
+
+    var reads: Int { lock.withLock { count } }
+
+    init(_ contents: Data) {
+        self.contents = contents
+        failure = nil
+    }
+
+    init(failing error: Error) {
+        contents = Data()
+        failure = error
+    }
+
+    func read() throws -> Data {
+        lock.withLock { count += 1 }
+        if let failure { throw failure }
+        return contents
+    }
+}

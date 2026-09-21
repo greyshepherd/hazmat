@@ -2,12 +2,27 @@ import Foundation
 
 /// What the caller expects to find in the live file, and therefore what an
 /// apply may replace. The expectation is the caller's proof: an apply replaces a
-/// block only when it is byte-identical to the one named here.
+/// block only when it is the one named here, byte for byte.
 public enum Replacement: Equatable, Sendable {
     /// Write only where the file holds no block.
     case onlyIfAbsent
-    /// Replace this block, which the caller read and intends to replace.
-    case block(Data)
+    /// Replace the block with this digest, which the caller read and intends to
+    /// replace. The digest names the bytes; the apply reads them again itself.
+    case block(ByteDigest)
+}
+
+/// What an apply did, and the bytes it replaced when it replaced any. The
+/// caller named the replaced block by its digest and need never have held its
+/// bytes; the apply read them, so it is the apply that hands them back to
+/// whoever keeps them for a revert.
+public struct ApplyResult: Equatable, Sendable {
+    public let outcome: ApplyOutcome
+    public let replaced: Data?
+
+    public init(outcome: ApplyOutcome, replaced: Data? = nil) {
+        self.outcome = outcome
+        self.replaced = replaced
+    }
 }
 
 /// How an apply changed the file.
@@ -132,70 +147,82 @@ public struct HostsFileApplier: Sendable {
         position: BlockPosition = .default,
         replacement: Replacement = .onlyIfAbsent
     ) -> ApplyOutcome {
+        applyReporting(block: block, position: position, replacement: replacement).outcome
+    }
+
+    /// The same apply, reporting the bytes of the block it replaced.
+    public func applyReporting(
+        block: Data,
+        position: BlockPosition = .default,
+        replacement: Replacement = .onlyIfAbsent
+    ) -> ApplyResult {
         let live: Data
         do {
             live = try file.read()
         } catch {
-            return .failed(reason: "reading \(file.url.path): \(error)")
+            return ApplyResult(outcome: .failed(reason: "reading \(file.url.path): \(error)"))
         }
 
         let present: Data?
         do {
             if let location = try ManagedBlock.locate(in: live) {
                 guard location.version == ManagedBlock.version else {
-                    return .refused(.liveFile(.unsupportedVersion(found: location.version, expected: ManagedBlock.version)))
+                    return ApplyResult(outcome: .refused(.liveFile(.unsupportedVersion(found: location.version, expected: ManagedBlock.version))))
                 }
                 present = Data(live[location.range])
             } else {
                 present = nil
             }
         } catch let error as BlockError {
-            return .refused(.liveFile(error))
+            return ApplyResult(outcome: .refused(.liveFile(error)))
         } catch {
-            return .refused(.liveFile(.invalidBlock("\(error)")))
+            return ApplyResult(outcome: .refused(.liveFile(.invalidBlock("\(error)"))))
         }
 
-        if present == block { return .nothingToDo }
+        if present == block { return ApplyResult(outcome: .nothingToDo) }
 
         switch (present, replacement) {
         case (nil, .onlyIfAbsent):
             break
         case (nil, .block):
             // Nothing to replace, so the caller's expectation cannot hold.
-            return .refused(.driftNotOverwritten)
+            return ApplyResult(outcome: .refused(.driftNotOverwritten))
         case (.some, .onlyIfAbsent):
-            return .refused(.driftNotOverwritten)
+            return ApplyResult(outcome: .refused(.driftNotOverwritten))
         case (.some(let liveBlock), .block(let expected)):
-            guard liveBlock == expected else { return .refused(.driftNotOverwritten) }
+            guard ByteDigest(liveBlock) == expected else { return ApplyResult(outcome: .refused(.driftNotOverwritten)) }
         }
 
         let planned: Data
         do {
             planned = try BlockSplice.splice(block: block, into: live, at: position)
         } catch let error as BlockError {
-            return .refused(.unusableBlock(.block(error)))
+            return ApplyResult(outcome: .refused(.unusableBlock(.block(error))))
         } catch {
-            return .failed(reason: "planning the write: \(error)")
+            return ApplyResult(outcome: .failed(reason: "planning the write: \(error)"))
         }
 
         switch PlanVerification.check(planned: planned, live: live) {
         case .ok:
             break
         case .refused(let refusal):
-            return .refused(.unusableBlock(refusal))
+            return ApplyResult(outcome: .refused(.unusableBlock(refusal)))
         case .bytesOutsideBlockChanged:
-            return .refused(.bytesOutsideBlockChanged)
+            return ApplyResult(outcome: .refused(.bytesOutsideBlockChanged))
         }
 
-        guard planned != live else { return .nothingToDo }
+        guard planned != live else { return ApplyResult(outcome: .nothingToDo) }
 
         switch writer.write(bytes: planned, baseline: live) {
         case .written:
-            return .applied(present == nil ? .installedBlock : .replacedBlock(overwroteDrift: true))
+            return ApplyResult(
+                outcome: .applied(present == nil ? .installedBlock : .replacedBlock(overwroteDrift: true)),
+                replaced: present
+            )
         case .refused(let reason):
-            return .refused(.privileged(reason))
+            return ApplyResult(outcome: .refused(.privileged(reason)))
         case .failed(let reason):
-            return .failed(reason: reason)
+            return ApplyResult(outcome: .failed(reason: reason))
         }
     }
 

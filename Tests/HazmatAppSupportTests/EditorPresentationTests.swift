@@ -30,10 +30,11 @@ final class EditorPresentationTests: XCTestCase {
     // MARK: - A read for a window that is not showing
 
     /// With no window showing, a read carries what the menu and the schedule
-    /// need — the rendered block, its entry count, what the live file holds —
-    /// and not the composition or the fragment's text, which only the panes
-    /// show and which are what a large fragment costs.
-    func testAReadWithoutDetailCarriesTheRenderingButNotTheCompositionOrTheText() throws {
+    /// need — the rendered block's digest, its entry count, what the live file
+    /// holds — and not the block's bytes, the composition or the fragment's
+    /// text, which only the panes show and which are what a large fragment
+    /// costs.
+    func testAReadWithoutDetailCarriesTheSummaryButNotTheBytesTheCompositionOrTheText() throws {
         let fixture = try twoLayerFixture()
         defer { fixture.remove() }
         let model = fixture.model(writer: UnregisteredHelper())
@@ -41,7 +42,9 @@ final class EditorPresentationTests: XCTestCase {
 
         let slim = model.read(selection: .profile(work), detail: false)
 
-        XCTAssertEqual(slim.rendering, full.rendering)
+        XCTAssertNil(slim.rendering, "the bytes are the panes' alone")
+        XCTAssertEqual(slim.renderedDigest, full.rendering.map(ByteDigest.init))
+        XCTAssertEqual(slim.renderedDigest, full.renderedDigest)
         XCTAssertEqual(slim.entryCount, full.entryCount)
         XCTAssertEqual(slim.live, full.live)
         XCTAssertEqual(slim.appliedProfiles, full.appliedProfiles)

@@ -22,14 +22,14 @@ final class ActivationTests: XCTestCase {
     func testReportsOffWhenTheFileHoldsNoBlock() throws {
         let live = try shippedHosts()
 
-        let result = Activation.match(live: live, renders: [ProfileRender(profile: work, rendering: .block(try rendered("127.0.0.1\tlocalhost\n")))])
+        let result = Activation.match(live: live, renders: [ProfileRender(profile: work, rendering: .block(ByteDigest(try rendered("127.0.0.1\tlocalhost\n"))))])
 
         XCTAssertEqual(result.state, .off)
         XCTAssertEqual(result.problems, [])
     }
 
     func testReportsAnUnreadableBlockWithItsReasonRatherThanDriftOrOff() throws {
-        let render = ProfileRender(profile: work, rendering: .block(try rendered("127.0.0.1\tlocalhost\n")))
+        let render = ProfileRender(profile: work, rendering: .block(ByteDigest(try rendered("127.0.0.1\tlocalhost\n"))))
         let cases: [(Data, BlockError)] = [
             (
                 bytes("# >>> hazmat:managed v1 >>>\n# <<< hazmat:managed v1 <<<\n# >>> hazmat:managed v1 >>>\n# <<< hazmat:managed v1 <<<\n"),
@@ -55,7 +55,7 @@ final class ActivationTests: XCTestCase {
     func testAProfileRenderingIdenticalBytesIsActive() throws {
         let block = try rendered("127.0.0.1\tlocalhost hazmat.local\n")
 
-        let result = Activation.match(live: block, renders: [ProfileRender(profile: work, rendering: .block(block))])
+        let result = Activation.match(live: block, renders: [ProfileRender(profile: work, rendering: .block(ByteDigest(block)))])
 
         XCTAssertEqual(result.state, .active([work]))
     }
@@ -67,8 +67,8 @@ final class ActivationTests: XCTestCase {
         let result = Activation.match(
             live: block,
             renders: [
-                ProfileRender(profile: work, rendering: .block(block)),
-                ProfileRender(profile: second, rendering: .block(block))
+                ProfileRender(profile: work, rendering: .block(ByteDigest(block))),
+                ProfileRender(profile: second, rendering: .block(ByteDigest(block)))
             ]
         )
 
@@ -77,20 +77,20 @@ final class ActivationTests: XCTestCase {
 
     func testAProfileRenderingAnEmptyBlockIsActiveRatherThanOff() throws {
         let empty = try renderedEmptyProfile()
-        let render = ProfileRender(profile: work, rendering: .block(empty))
+        let render = ProfileRender(profile: work, rendering: .block(ByteDigest(empty)))
 
         XCTAssertEqual(Activation.match(live: empty, renders: [render]).state, .active([work]))
         // The same bytes with nothing rendering them are a block no profile owns.
-        XCTAssertEqual(Activation.match(live: empty, renders: []).state, .drifted(liveBlock: empty))
+        XCTAssertEqual(Activation.match(live: empty, renders: []).state, .drifted(ByteDigest(empty)))
     }
 
     func testABlockMatchingNoRenderingIsDriftedAndNamesNoProfile() throws {
         let block = try rendered("127.0.0.1\tlocalhost\n")
         let otherProfile = try rendered("10.0.0.9\tlocalhost\n")
 
-        let result = Activation.match(live: block, renders: [ProfileRender(profile: work, rendering: .block(otherProfile))])
+        let result = Activation.match(live: block, renders: [ProfileRender(profile: work, rendering: .block(ByteDigest(otherProfile)))])
 
-        XCTAssertEqual(result.state, .drifted(liveBlock: block))
+        XCTAssertEqual(result.state, .drifted(ByteDigest(block)))
     }
 
     // MARK: - 1.2 A profile that cannot render is reported
@@ -104,7 +104,7 @@ final class ActivationTests: XCTestCase {
             live: block,
             renders: [
                 ProfileRender(profile: broken, rendering: .problem(reason)),
-                ProfileRender(profile: work, rendering: .block(block))
+                ProfileRender(profile: work, rendering: .block(ByteDigest(block)))
             ]
         )
 
@@ -120,7 +120,7 @@ final class ActivationTests: XCTestCase {
             renders: [ProfileRender(profile: work, rendering: .problem("the fragment is malformed"))]
         )
 
-        XCTAssertEqual(result.state, .drifted(liveBlock: block))
+        XCTAssertEqual(result.state, .drifted(ByteDigest(block)))
         XCTAssertEqual(result.problems, [ProfileRenderProblem(profile: work, reason: "the fragment is malformed")])
     }
 
@@ -136,7 +136,7 @@ final class ActivationTests: XCTestCase {
 
         let result = Activation.match(
             live: try LiveHostsFile(url: target.url).read(),
-            renders: [ProfileRender(profile: work, rendering: .block(block))]
+            renders: [ProfileRender(profile: work, rendering: .block(ByteDigest(block)))]
         )
 
         XCTAssertEqual(result.state, .active([work]))
@@ -150,8 +150,8 @@ final class ActivationTests: XCTestCase {
         let second = ProfileID("second")
         let broken = ProfileID("broken")
         let renders = [
-            ProfileRender(profile: work, rendering: .block(block)),
-            ProfileRender(profile: second, rendering: .block(block)),
+            ProfileRender(profile: work, rendering: .block(ByteDigest(block))),
+            ProfileRender(profile: second, rendering: .block(ByteDigest(block))),
             ProfileRender(profile: broken, rendering: .problem("the fragment is malformed"))
         ]
 

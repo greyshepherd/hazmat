@@ -6,15 +6,16 @@ import HazmatCore
 /// parse; and the compositions and renderings derived from them.
 ///
 /// Nothing is presented from the cache: a read always reads the file. The cache
-/// is consulted only about bytes that came back byte-identical, so a same-second,
-/// same-length rewrite is seen for what it is rather than missed the way file
-/// metadata would miss it.
+/// is consulted only about bytes whose digest came back identical, so a
+/// same-second, same-length rewrite is seen for what it is rather than missed
+/// the way file metadata would miss it. The digest is what is kept: the bytes
+/// of a large fragment belong to the read that made them, not to the cache.
 ///
 /// One entry per file and one per derivation slot, so the cache is bounded by the
 /// store rather than by how often the store was edited.
 public final class StoreCache: StoreReadingCache, @unchecked Sendable {
     private struct FileEntry {
-        let bytes: Data
+        let digest: ByteDigest
         let generation: Int
         let summary: Any
         /// The whole parse, held while something asked for it and let go by a
@@ -31,13 +32,13 @@ public final class StoreCache: StoreReadingCache, @unchecked Sendable {
 
     public func file<T, S>(
         _ url: URL,
-        bytes: Data,
+        digest: ByteDigest,
         derive: () -> T,
         summarise: (T) -> S,
         hold: Bool
     ) -> (generation: Int, summary: S) {
         lock.lock()
-        if let entry = files[url], entry.bytes == bytes, let summary = entry.summary as? S {
+        if let entry = files[url], entry.digest == digest, let summary = entry.summary as? S {
             lock.unlock()
             return (entry.generation, summary)
         }
@@ -48,7 +49,7 @@ public final class StoreCache: StoreReadingCache, @unchecked Sendable {
 
         lock.lock()
         let generation = nextGeneration()
-        files[url] = FileEntry(bytes: bytes, generation: generation, summary: summary, parse: hold ? value : nil)
+        files[url] = FileEntry(digest: digest, generation: generation, summary: summary, parse: hold ? value : nil)
         lock.unlock()
         return (generation, summary)
     }
@@ -101,12 +102,12 @@ public final class StoreCache: StoreReadingCache, @unchecked Sendable {
         lock.unlock()
     }
 
-    public func releaseParses() {
+    public func releaseDetail() {
         lock.lock()
         for url in files.keys {
             files[url]?.parse = nil
         }
-        derivations = derivations.filter { $0.key.kind != .composition }
+        derivations = derivations.filter { $0.key.kind == .rendering }
         lock.unlock()
     }
 

@@ -230,11 +230,11 @@ final class ShellModel {
     private var readTicket = 0
 
     /// The real read: the editor's presentation, and the menu's derivation when
-    /// it is wanted, both from one session.
+    /// it is wanted, from one reading of the store and one read of the live
+    /// file.
     private static let storeRead: StoreRead = { session, selection, search, activation, detail in
-        let editor = session.editor.read(selection: selection, search: search, detail: detail)
-        let reading = activation ? session.catalogue.activation(reading: session.liveFile) : nil
-        return (editor, reading)
+        let reading = session.editor.reading(selection: selection, search: search, detail: detail)
+        return (reading.presentation, activation ? reading.activation : nil)
     }
 
     /// How long an answer is trusted while it says the helper is answering. A
@@ -283,9 +283,10 @@ final class ShellModel {
         // The launch read carries detail only for a window that is showing;
         // otherwise it is what the menu needs, and the window's own read
         // follows once it shows.
-        editor = session.editor.read(detail: windowShowing)
-        reading = session.catalogue.activation(reading: session.liveFile)
-        if !windowShowing { session.cache.releaseParses() }
+        let launch = session.editor.reading(detail: windowShowing)
+        editor = launch.presentation
+        reading = launch.activation
+        if !windowShowing { session.cache.releaseDetail() }
         helper = registrationState()
         selection = editor.selection
         adoptFragmentDraft(editor)
@@ -577,9 +578,9 @@ final class ShellModel {
             await MainActor.run {
                 self.adopt(presentation, latestReading, ticket: ticket)
                 // A read for a window that is not showing may have parsed a
-                // changed file to render it; nothing shows the parse, so it
-                // is let go with the composition.
-                if !intent.detail { intent.session.cache.releaseParses() }
+                // changed file to render it; nothing shows the parse or the
+                // block, so they are let go with the composition.
+                if !intent.detail { intent.session.cache.releaseDetail() }
             }
         }
     }
@@ -1272,8 +1273,8 @@ final class ShellModel {
 
     /// Replaces the block no profile owns, which the menu offered as its own
     /// item. The reading named the block, so the apply replaces exactly it.
-    func overwriteDrift(with profile: ProfileID, liveBlock: Data) {
-        apply(profile, replacing: .block(liveBlock))
+    func overwriteDrift(with profile: ProfileID, block: ByteDigest) {
+        apply(profile, replacing: .block(block))
     }
 
     /// The window's deliberate overwrite of the drifted block the editor's last
@@ -1284,7 +1285,7 @@ final class ShellModel {
 
     private func namingTheMatchedProfile(_ matched: ProfileID) -> Replacement {
         do {
-            return .block(try session.catalogue.renderedBlock(for: matched))
+            return .block(try session.catalogue.renderedDigest(for: matched))
         } catch {
             return .onlyIfAbsent
         }

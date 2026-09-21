@@ -93,12 +93,13 @@ final class ShellWindowCloseTests: XCTestCase {
         let cache = try XCTUnwrap(sessions.last?.cache)
         let layout = try XCTUnwrap(sessions.last?.layout)
         XCTAssertEqual(cache.heldParses, [layout.fragmentURL(world.base), layout.fragmentURL(world.project)])
-        let rendering = model.editor.rendering
+        let digest = model.editor.renderedDigest
 
         NotificationCenter.default.post(name: NSWindow.willCloseNotification, object: window)
         await settle { model.editor.resolved.composition == nil }
 
-        XCTAssertEqual(model.editor.rendering, rendering, "the rendered block is kept for the menu")
+        XCTAssertEqual(model.editor.renderedDigest, digest, "the rendered block's digest is kept for the menu")
+        XCTAssertNil(model.editor.rendering, "its bytes are not")
         XCTAssertEqual(model.editor.entryCount, 2)
         XCTAssertEqual(model.editor.selectedProfile, world.work)
         XCTAssertTrue(cache.heldParses.isEmpty, "no parse is held for a window that is not showing")
@@ -129,7 +130,8 @@ final class ShellWindowCloseTests: XCTestCase {
             )
         }
         XCTAssertNil(model.editor.resolved.composition, "the launch read carries no composition")
-        XCTAssertNotNil(model.editor.rendering, "but the block the menu compares")
+        XCTAssertNotNil(model.editor.renderedDigest, "but the digest the menu compares")
+        XCTAssertNil(model.editor.rendering, "and not the bytes")
         model.refresh()
         try? await Task.sleep(for: .milliseconds(200))
         let cache = try XCTUnwrap(sessions.last?.cache)

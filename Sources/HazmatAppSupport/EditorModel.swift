@@ -100,19 +100,23 @@ public struct EditorModel: Sendable {
     /// The moment a read is answered from, so "out of date" is decided once, in
     /// one place, rather than wherever a row is rendered.
     public let now: @Sendable () -> Date
+    /// The live file a read reads. The seam exists so a test can count reads.
+    public let liveFile: any LiveFileReading
 
     public init(
         storeRoot: URL,
         fileURL: URL,
         writer: PrivilegedWriter,
         cache: StoreCache? = nil,
-        now: @escaping @Sendable () -> Date = { Date() }
+        now: @escaping @Sendable () -> Date = { Date() },
+        liveFile: (any LiveFileReading)? = nil
     ) {
         layout = StoreLayout(root: storeRoot)
         self.fileURL = fileURL
         self.writer = writer
         self.cache = cache
         self.now = now
+        self.liveFile = liveFile ?? LiveHostsFile(url: fileURL)
     }
 
     private var store: DirectoryStore { DirectoryStore(root: layout.root) }
@@ -136,6 +140,18 @@ public struct EditorModel: Sendable {
         search: StoreSearch = .none,
         detail: Bool = true
     ) -> EditorPresentation {
+        reading(selection: selection, search: search, detail: detail).presentation
+    }
+
+    /// The same read, with the menu's derivation beside the window's
+    /// presentation: one reading of the store and one read of the live file
+    /// answer both, so a refresh reads the file once and the two cannot
+    /// disagree about which profile is the live one.
+    public func reading(
+        selection: SidebarSelection? = nil,
+        search: StoreSearch = .none,
+        detail: Bool = true
+    ) -> EditorReading {
         let reading = StoreReading(layout: layout, cache: cache)
         let profiles = reading.profiles
         let sources = RemoteSourceCatalogue(layout: layout).readings()
@@ -163,16 +179,19 @@ public struct EditorModel: Sendable {
         }
 
         var storeProblem: String?
+        var summary: BlockSummary?
         let resolved: ResolvedView
         if let selectedProfile {
             do {
-                // The rendering is derived through the composition, but is
+                // The summary is derived through the composition, but is
                 // reused across reads on its own, so a read without detail
-                // composes nothing while the bytes are unchanged.
-                let rendering = try reading.rendering(of: selectedProfile)
+                // composes and renders nothing while the bytes are unchanged,
+                // and holds no bytes either way.
+                let blockSummary = try reading.summary(of: selectedProfile)
+                summary = blockSummary
                 resolved = detail
-                    ? .composed(try reading.composition(of: selectedProfile), rendering: rendering)
-                    : .rendered(rendering)
+                    ? .composed(try reading.composition(of: selectedProfile), rendering: try reading.rendering(of: selectedProfile))
+                    : .rendered(blockSummary)
             } catch let error as CompositionError {
                 resolved = .unresolvable(error.problems)
             } catch {
@@ -183,9 +202,9 @@ public struct EditorModel: Sendable {
             resolved = .unresolvable([])
         }
 
-        let live = liveReading(reading: reading, rendering: resolved.renderedBlock, profiles: profiles)
+        let live = liveReading(reading: reading, rendering: summary?.digest, profiles: profiles)
 
-        return EditorPresentation(
+        let presentation = EditorPresentation(
             storePath: layout.root.path,
             hostsFilePath: fileURL.path,
             storeExists: layout.exists,
@@ -218,7 +237,8 @@ public struct EditorModel: Sendable {
             resolved: resolved,
             hasDetail: detail,
             renderedBlock: resolved.renderedBlock,
-            entryCount: resolved.renderedBlock.map(BlockRenderer.entryCount(in:)) ?? 0,
+            renderedDigest: summary?.digest,
+            entryCount: summary?.entryCount ?? 0,
             usingProfiles: selectedFragment.map { Self.profiles(using: $0, in: profiles, reading: reading) } ?? [],
             appliedProfiles: live.appliedProfiles,
             liveBlock: live.block,
@@ -235,6 +255,7 @@ public struct EditorModel: Sendable {
             ),
             fragmentUsers: Self.fragmentUsers(in: profiles, reading: reading)
         )
+        return EditorReading(presentation: presentation, activation: live.activation)
     }
 
     /// What the sidebar's selection resolves to: which item the content pane
@@ -330,39 +351,60 @@ public struct EditorModel: Sendable {
     }
 
     /// The live file read once, classified against the block the selected
-    /// profile renders, with the profiles whose block is the live one. One read
-    /// answers both, and every profile's rendering comes from the same reading
-    /// of the store, so the sidebar's marks cost no second read and no second
-    /// parse.
+    /// profile renders, with the profiles whose block is the live one and the
+    /// menu's derivation of the same read. One read answers all three, and
+    /// every profile's summary comes from the same reading of the store, so
+    /// the sidebar's marks cost no second read, no second parse and no
+    /// rendering while the store is unchanged.
     private func liveReading(
         reading: StoreReading,
-        rendering: Data?,
+        rendering: ByteDigest?,
         profiles: [ProfileID]
-    ) -> (state: LiveBlockState, appliedProfiles: [ProfileID], block: Data?) {
+    ) -> (state: LiveBlockState, appliedProfiles: [ProfileID], block: ByteDigest?, activation: ActiveProfileReading) {
+        // The menu's answer for a store that is missing or empty is decided
+        // before the file is read; the window still classifies the file.
+        let bare: ActiveProfileReading? = !layout.exists ? .missingStore : profiles.isEmpty ? .emptyStore : nil
         let live: Data
         do {
-            live = try LiveHostsFile(url: fileURL).read()
+            live = try liveFile.read()
         } catch {
-            return (.unreadable(reason: "\(error)"), [], nil)
+            let reason = "\(error)"
+            return (.unreadable(reason: reason), [], nil, bare ?? .unreadableFile(profiles: profiles, reason: reason))
+        }
+        if let bare {
+            return (Self.state(of: Activation.match(live: live, renders: []), rendering: rendering), [], nil, bare)
         }
 
-        let located: ManagedBlockLocation?
-        do {
-            located = try ManagedBlock.locate(in: live)
-        } catch let error as BlockError {
-            return (.refused(error), [], nil)
-        } catch {
-            return (.unreadable(reason: "\(error)"), [], nil)
+        let renders = profiles.map { profile -> ProfileRender in
+            do {
+                return ProfileRender(profile: profile, rendering: .block(try reading.summary(of: profile).digest))
+            } catch {
+                return ProfileRender(profile: profile, rendering: .problem("\(error)"))
+            }
         }
+        let activation = Activation.match(live: live, renders: renders)
+        return (
+            Self.state(of: activation, rendering: rendering),
+            activation.activeProfiles,
+            activation.liveBlock,
+            .derived(profiles: profiles, activation: activation)
+        )
+    }
 
-        guard let located else { return (.absent, [], nil) }
-        guard located.version == ManagedBlock.version else {
-            return (.refused(.unsupportedVersion(found: located.version, expected: ManagedBlock.version)), [], nil)
+    /// The window's view of what the derivation found: the same block, judged
+    /// against the selected profile's rendering.
+    private static func state(of activation: ActiveProfile, rendering: ByteDigest?) -> LiveBlockState {
+        switch activation.state {
+        case .off:
+            return .absent
+        case .unreadable(let error):
+            return .refused(error)
+        case .drifted(let block):
+            return .drifted(block)
+        case .active:
+            guard let block = activation.liveBlock else { return .absent }
+            return block == rendering ? .applied : .drifted(block)
         }
-        let block = Data(live[located.range])
-        let applied = profiles.filter { (try? reading.rendering(of: $0)) == block }
-        if let rendering, block == rendering { return (.applied, applied, block) }
-        return (.drifted(liveBlock: block), applied, block)
     }
 
     private static func actions(
@@ -382,7 +424,7 @@ public struct EditorModel: Sendable {
             actions.append(.deleteProfile(selectedProfile))
             actions.append(.applyProfile(selectedProfile))
             if case .drifted(let block) = live {
-                actions.append(.overwriteDrift(selectedProfile, liveBlock: block))
+                actions.append(.overwriteDrift(selectedProfile, block: block))
             }
             for index in layers.indices {
                 actions.append(.removeLayer(selectedProfile, index: index))
@@ -608,15 +650,11 @@ public struct EditorModel: Sendable {
             return (.failed(reason: "rendering \(profile): \(error)"), nil)
         }
 
-        let outcome = applier.apply(block: block, replacement: replacement)
-        guard outcome.isApplied else { return (outcome, nil) }
-
-        let replaced: Data?
-        switch replacement {
-        case .onlyIfAbsent: replaced = nil
-        case .block(let expected): replaced = expected
-        }
-        return (outcome, ApplyRecord(profile: profile, block: block, replaced: replaced))
+        // The replaced bytes are the apply's to report: the caller named the
+        // block by its digest and never held them.
+        let result = applier.applyReporting(block: block, replacement: replacement)
+        guard result.outcome.isApplied else { return (result.outcome, nil) }
+        return (result.outcome, ApplyRecord(profile: profile, block: ByteDigest(block), replaced: result.replaced))
     }
 
     /// Undoes an apply by replacing the block it wrote with the block it
@@ -631,10 +669,10 @@ public struct EditorModel: Sendable {
             return .failed(reason: "reading \(fileURL.path): \(error)")
         }
 
-        let present: Data?
+        let present: ByteDigest?
         do {
             if let located = try ManagedBlock.locate(in: live) {
-                present = Data(live[located.range])
+                present = ByteDigest(live[located.range])
             } else {
                 present = nil
             }
@@ -681,7 +719,7 @@ public struct EditorModel: Sendable {
             return EditorOutcome(store: .failure(.failed("\(error)")))
         }
 
-        guard write == .wrote, previous.isApplied, let before = previous.rendering else {
+        guard write == .wrote, previous.isApplied, let before = previous.renderedDigest else {
             return EditorOutcome(store: .success(write))
         }
         return applying(profile: profile, replacing: before, store: .success(write))
@@ -689,12 +727,12 @@ public struct EditorModel: Sendable {
 
     /// The apply half of a change that can reach the live file: renders the
     /// profile again and replaces `before` with it through the privileged write.
-    /// `before` is the block the live file is expected to hold, so the applier's
-    /// own byte-identity check refuses a file that moved and reports drift
-    /// instead of overwriting it.
+    /// `before` names the block the live file is expected to hold, so the
+    /// applier's own byte-identity check refuses a file that moved and reports
+    /// drift instead of overwriting it.
     private func applying(
         profile: ProfileID,
-        replacing before: Data,
+        replacing before: ByteDigest,
         store: Result<StoreWrite, StoreWriteError>,
         refresh: RemoteRefresh? = nil
     ) -> EditorOutcome {
