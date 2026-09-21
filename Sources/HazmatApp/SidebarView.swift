@@ -73,44 +73,46 @@ struct SidebarView: View {
     }
 
     private func fragmentRow(_ row: FragmentRow) -> some View {
-        HStack(spacing: 8) {
-            VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(row.fragment.rawValue)
-                        .foregroundStyle(.primary)
-                    if row.isRemote {
-                        // A globe, not a download arrow: this marks where the
-                        // text comes from, and an arrow read as something the
-                        // row was about to do.
-                        Image(systemName: "globe")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .help(row.origin?.url?.absoluteString ?? "the source record cannot be read")
-                    }
+        VStack(alignment: .leading, spacing: 1) {
+            HStack(spacing: 4) {
+                Text(row.fragment.rawValue)
+                    .foregroundStyle(.primary)
+                if row.isRemote {
+                    // A globe, not a download arrow: this marks where the text
+                    // comes from, and an arrow read as something the row was
+                    // about to do.
+                    Image(systemName: "globe")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .help(row.origin?.url?.absoluteString ?? "the source record cannot be read")
                 }
-                if let origin = row.origin {
-                    // A source's row names where its text comes from and how the
-                    // last refresh went, in place of the entry count that would
-                    // only say how much arrived. The domain, not the whole
-                    // address: a sidebar column truncates an address to the point
-                    // where two sources look alike.
-                    Text(origin.host ?? "the source record cannot be read")
+                Spacer(minLength: 4)
+                // A fetched fragment is counted like a pasted one: how much
+                // arrived is as worth knowing as where it came from. A source
+                // whose first fetch failed has no text to count, and its own
+                // line says why instead.
+                if let counted = row.entryCountPhrase {
+                    Text(counted)
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .truncationMode(.middle)
-                        .help(origin.url?.absoluteString ?? "the source record cannot be read")
-                    Text(origin.state)
-                        .font(.caption)
-                        .foregroundStyle(origin.isOutOfDate ? .orange : .secondary)
-                        .lineLimit(2)
                 }
             }
-            Spacer(minLength: 4)
-            if !row.isRemote {
-                Text("\(row.entryCount) \(row.entryCount == 1 ? "entry" : "entries")")
+            if let origin = row.origin {
+                // A source's row names where its text comes from and how the
+                // last refresh went. The domain, not the whole address: a
+                // sidebar column truncates an address to the point where two
+                // sources look alike.
+                Text(origin.host ?? "the source record cannot be read")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .help(origin.url?.absoluteString ?? "the source record cannot be read")
+                Text(origin.state)
+                    .font(.caption)
+                    .foregroundStyle(origin.isOutOfDate ? .orange : .secondary)
+                    .lineLimit(2)
             }
         }
         .accessibilityElement(children: .combine)
@@ -118,10 +120,12 @@ struct SidebarView: View {
     }
 
     private func accessibilityLabel(_ row: FragmentRow) -> String {
+        let counted = row.entryCountPhrase.map { ", \($0)" } ?? ""
         guard let origin = row.origin else {
-            return "\(row.fragment.rawValue), \(row.entryCount) entries"
+            return "\(row.fragment.rawValue)\(counted)"
         }
-        return "\(row.fragment.rawValue), fetched from \(origin.url?.absoluteString ?? "an unreadable source record"), \(origin.state)"
+        let from = origin.url?.absoluteString ?? "an unreadable source record"
+        return "\(row.fragment.rawValue), fetched from \(from)\(counted), \(origin.state)"
     }
 
     /// A row's own menu acts on that row, not on the selection: opening it does

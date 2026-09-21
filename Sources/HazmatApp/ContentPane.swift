@@ -186,7 +186,7 @@ struct FragmentEditor: View {
 
             LabeledContent("Entries") {
                 let count = editor.entryCount(of: fragment) ?? 0
-                Text("\(count) \(count == 1 ? "entry" : "entries")")
+                Text(EntryCount.phrase(count))
                     .foregroundStyle(.secondary)
             }
 
@@ -291,7 +291,7 @@ struct LayerStackPane: View {
             Text(row.fragment.rawValue)
                 .foregroundStyle(.primary)
             Spacer(minLength: 4)
-            Text("\(row.entryCount) \(row.entryCount == 1 ? "entry" : "entries")")
+            Text(EntryCount.phrase(row.entryCount))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button {

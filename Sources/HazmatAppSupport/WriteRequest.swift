@@ -13,9 +13,9 @@ public enum WriteRequest: Equatable, Sendable {
     public var title: String {
         switch self {
         case .apply(_, let entries, let file):
-            return "Apply \(entries) \(entries == 1 ? "entry" : "entries") to \(file)?"
+            return "Apply \(EntryCount.phrase(entries)) to \(file)?"
         case .overwriteDrift(_, let entries, let file):
-            return "Replace the block in \(file) with \(entries) \(entries == 1 ? "entry" : "entries")?"
+            return "Replace the block in \(file) with \(EntryCount.phrase(entries))?"
         case .revert(_, let file, let removesBlock):
             return removesBlock ? "Remove the managed block from \(file)?" : "Restore the previous block in \(file)?"
         case .removeBlock(let file):

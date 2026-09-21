@@ -396,6 +396,62 @@ final class EditorPresentationTests: XCTestCase {
         }
     }
 
+    func testAFetchedFragmentIsCountedLikeAPastedOne() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        // `base` holds one entry and is a source; `project` holds two and is not.
+        try fixture.writeSource(base, url: "https://example.com/base.txt", interval: 6 * 3600, lastSuccess: readAt)
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read()
+
+        XCTAssertEqual(presentation.fragmentRow(base)?.entryCountPhrase, "1 entry", "a fetched fragment is counted too")
+        XCTAssertEqual(presentation.fragmentRow(project)?.entryCountPhrase, "2 entries")
+        XCTAssertTrue(presentation.fragmentRow(base)?.hasText ?? false)
+    }
+
+    func testASourceWithNoTextYetHasNoCountToShow() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        // A first fetch that failed: a sidecar and no fragment.
+        try fixture.writeSource(
+            FragmentID("blocklist"),
+            url: "https://example.com/hosts.txt",
+            interval: 6 * 3600,
+            lastFailure: "the server answered 503"
+        )
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let row = try XCTUnwrap(model.read().fragmentRow(FragmentID("blocklist")))
+
+        XCTAssertTrue(row.isRemote, "it is still a row, with its own line saying why")
+        XCTAssertFalse(row.hasText)
+        XCTAssertEqual(row.entryCount, 0)
+        XCTAssertNil(row.entryCountPhrase, "there is nothing to count yet, so the row says nothing")
+    }
+
+    func testAFragmentThatIsThereAndEmptyCountsZeroWhileOneThatIsNotThereShowsNothing() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        let empty = FragmentID("empty")
+        let missing = FragmentID("missing")
+        try fixture.store.write("", to: "fragments/empty.hosts")
+        try fixture.writeSource(missing, url: "https://example.com/missing.txt", interval: 6 * 3600)
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read()
+
+        XCTAssertEqual(
+            presentation.fragmentRow(empty)?.entryCountPhrase,
+            "0 entries",
+            "a fragment that is there and holds nothing is counted"
+        )
+        XCTAssertNil(
+            presentation.fragmentRow(missing)?.entryCountPhrase,
+            "a fragment that is not there has a reason instead of a count"
+        )
+    }
+
     func testASourceWhoseTextIsNotThereYetOffersTheRefreshAndNoSave() throws {
         let fixture = try twoLayerFixture()
         defer { fixture.remove() }

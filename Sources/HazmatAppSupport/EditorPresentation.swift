@@ -125,7 +125,14 @@ public struct FragmentRow: Equatable, Sendable, Identifiable {
     }
 
     public let fragment: FragmentID
+    /// How many entries the fragment's text holds, counted in place by the
+    /// reading: a fetched blocklist of a hundred thousand lines costs one pass
+    /// and no array of them.
     public let entryCount: Int
+    /// Whether the store holds the fragment's text at all. A source whose first
+    /// fetch failed has a row and no text, and its own line says why rather than
+    /// showing a count of nothing.
+    public let hasText: Bool
     /// The origin, when the fragment is a source. `nil` for an ordinary
     /// fragment.
     public let origin: Origin?
@@ -134,6 +141,12 @@ public struct FragmentRow: Equatable, Sendable, Identifiable {
 
     /// Whether the fragment is fetched from a URL.
     public var isRemote: Bool { origin != nil }
+
+    /// The entries the fragment holds, as its row says them, or `nil` when there
+    /// is no text to count yet.
+    public var entryCountPhrase: String? {
+        hasText ? EntryCount.phrase(entryCount) : nil
+    }
 }
 
 /// A layer of the selected profile: its position in the stack and the entries

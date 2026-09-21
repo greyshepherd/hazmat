@@ -97,7 +97,7 @@ public enum WriteState: Equatable, Sendable {
         case .inSync:
             return "The live block is the block this profile renders."
         case .pending(let entries):
-            return "Writing replaces the managed block with \(entries) \(entries == 1 ? "entry" : "entries")."
+            return "Writing replaces the managed block with \(EntryCount.phrase(entries))."
         case .blocked(let cause, _):
             return cause
         }

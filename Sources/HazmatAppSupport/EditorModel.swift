@@ -183,15 +183,12 @@ public struct EditorModel: Sendable {
                 )
             },
             fragmentRows: matchingFragments.map { fragment in
-                FragmentRow(
+                let hasText = reading.fragment(fragment) != nil
+                return FragmentRow(
                     fragment: fragment,
                     entryCount: Self.entryCount(of: fragment, in: reading),
-                    origin: Self.origin(
-                        of: fragment,
-                        sources: sources,
-                        hasText: reading.fragment(fragment) != nil,
-                        at: at
-                    )
+                    hasText: hasText,
+                    origin: Self.origin(of: fragment, sources: sources, hasText: hasText, at: at)
                 )
             },
             selectedProfile: selectedProfile,

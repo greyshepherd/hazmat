@@ -85,7 +85,7 @@ struct DetailPane: View {
 
         if editor.rendering != nil {
             let count = editor.entryCount
-            Text("\(count) \(count == 1 ? "entry" : "entries")")
+            Text(EntryCount.phrase(count))
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
@@ -156,7 +156,7 @@ struct DetailPane: View {
         }
 
         let entries = editor.entryCount(of: fragment) ?? 0
-        Text("\(fragment.rawValue) holds \(entries) \(entries == 1 ? "entry" : "entries").")
+        Text("\(fragment.rawValue) holds \(EntryCount.phrase(entries)).")
             .font(.caption)
             .foregroundStyle(.secondary)
 

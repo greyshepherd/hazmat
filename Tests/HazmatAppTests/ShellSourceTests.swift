@@ -281,6 +281,10 @@ final class ShellSourceTests: XCTestCase {
         XCTAssertTrue(sidebar.contains("origin.state"), sidebar)
         XCTAssertTrue(sidebar.contains("model.refreshSource(fragment)"), sidebar)
         XCTAssertTrue(sidebar.contains(".help(row.origin?.url?.absoluteString"), sidebar)
+        // The count is shown for a fetched fragment as well as a pasted one, and
+        // only where there is text to count.
+        XCTAssertTrue(sidebar.contains("row.entryCountPhrase"), sidebar)
+        XCTAssertFalse(sidebar.contains("if !row.isRemote"), "the count is no longer kept from a source's row")
 
         let content = try windowSource("ContentPane.swift")
         // The text is read-only for a source, with the URL and the refresh action
