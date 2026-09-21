@@ -102,6 +102,28 @@ final class ShellRefreshTests: XCTestCase {
         XCTAssertFalse(RemoteSchedule.isDue(try world.source(world.base), at: clock.now))
     }
 
+    @MainActor
+    func testARefreshThatFoundNothingChangedSaysNothingInTheStatusRow() async throws {
+        let world = try ShellWorld()
+        defer { world.remove() }
+        let clock = TestClock(start)
+        // The file is unmodified, so the refresh has nothing to report.
+        let fetcher = ScriptedFetcher(.notModified(etag: "\"v1\"", finalURL: url))
+        let writer = CountingWriter(target: world.liveURL)
+        let model = try applied(world, clock: clock, fetcher: fetcher, writer: writer)
+        await settle { !model.busy && model.editor.isApplied }
+
+        model.refreshSource(world.base)
+        await settle { !model.busy && (try? world.source(world.base).lastAttempt) == start }
+
+        XCTAssertTrue(model.notice.isEmpty, "the status row says nothing: \(model.notice.text)")
+        XCTAssertEqual(writer.writes, 0)
+        // The source's own row is where the refresh shows: it succeeded, so it is
+        // no longer out of date.
+        XCTAssertFalse(RemoteSchedule.isDue(try world.source(world.base), at: clock.now))
+        XCTAssertEqual(try world.source(world.base).lastSuccess, start)
+    }
+
     // MARK: - 4.3 The outcome reaches the window
 
     @MainActor

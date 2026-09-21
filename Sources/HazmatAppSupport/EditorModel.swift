@@ -54,7 +54,14 @@ public struct EditorOutcome: Equatable, Sendable {
         }
         switch store {
         case .success(let write):
-            parts.append(Self.describe(write))
+            // A refresh's own answer covers the store: the write it made is the
+            // write it describes, so the clause would only repeat it. On a
+            // refresh that changed nothing the two read as one broken sentence
+            // — "the source is unchanged the store already held that text" —
+            // and on a refused one a plain failure carried that same tail.
+            if refresh == nil {
+                parts.append(Self.describe(write))
+            }
         case .failure(let error):
             parts.append("refused: \(error)")
         case nil:

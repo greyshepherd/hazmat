@@ -629,6 +629,80 @@ final class EditorModelTests: XCTestCase {
         XCTAssertTrue(outcome.description.contains("not registered"), outcome.description)
     }
 
+    func testARefreshSaysWhatItDidOnceRatherThanTwice() async throws {
+        // A refresh's own answer covers the store, so the store's clause is not
+        // repeated. Before this, the two ran together with nothing between them:
+        // "the source is unchanged the store already held that text".
+        let (fixture, source) = try remoteFixture()
+        defer { fixture.remove() }
+        let writer = LocalWriter(target: fixture.live.url)
+        let model = fixture.model(writer: writer)
+        try fixture.applyToLive(work)
+        let before = model.read(selection: .profile(work))
+
+        let unchanged = await model.refresh(
+            fragment: base,
+            source: source,
+            previous: before,
+            fetcher: StubFetcher(.notModified(etag: "\"v1\"", finalURL: source.url)),
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+        XCTAssertEqual(unchanged.description, "the source is unchanged")
+
+        let refused = await model.refresh(
+            fragment: base,
+            source: source,
+            previous: before,
+            fetcher: StubFetcher(.refused("the server answered 503", finalURL: source.url)),
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+        XCTAssertEqual(
+            refused.description,
+            "the source was not refreshed: the server answered 503",
+            "a failure carries no tail about the store"
+        )
+
+        let written = await model.refresh(
+            fragment: base,
+            source: source,
+            previous: model.read(selection: .profile(work)),
+            fetcher: StubFetcher(.succeeded(body: bytes("127.0.0.1\trefreshed.example\n"), finalURL: source.url)),
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+        XCTAssertEqual(
+            written.description,
+            "the source fetched new text applied: drift was overwritten",
+            "the text and the apply, and no third clause repeating either"
+        )
+    }
+
+    func testAnEditStillSaysWhatTheStoreDid() async throws {
+        // The store's own clause is only dropped when a refresh describes it: an
+        // ordinary edit has nothing else to say about the store.
+        let fixture = try stackedFixture()
+        defer { fixture.remove() }
+        let model = fixture.model(writer: LocalWriter(target: fixture.live.url))
+
+        let saved = model.save(
+            fragment: base,
+            text: "127.0.0.1\tchanged.example\n",
+            editing: nil,
+            previous: model.read(selection: .profile(work))
+        )
+        XCTAssertEqual(saved.description, "the store holds the edit")
+
+        let identical = model.save(
+            fragment: base,
+            text: "127.0.0.1\tchanged.example\n",
+            editing: nil,
+            previous: model.read(selection: .profile(work))
+        )
+        XCTAssertEqual(identical.description, "the store already held that text")
+
+        let deleted = model.delete(fragment: project)
+        XCTAssertEqual(deleted.description, "the name was deleted")
+    }
+
     func testARefreshWithNoChangeWritesNothingAndReportsIt() async throws {
         let (fixture, source) = try remoteFixture()
         defer { fixture.remove() }

@@ -42,6 +42,10 @@ public struct RemoteRefresh: Equatable, Sendable {
     /// Whether the store gained new text.
     public var didWrite: Bool { outcome == .wrote }
 
+    /// Whether the answer carried no change at all: the server said the file was
+    /// unmodified, or the fetched text was already what the fragment holds.
+    public var wasUnchanged: Bool { outcome == .unchanged }
+
     /// Whether the refresh did not do what it set out to do.
     public var wasRefused: Bool {
         if case .refused = outcome { return true }

@@ -38,8 +38,18 @@ extension MenuNotice {
     }
 
     /// The editor's combined answer: any refusal or problem in it needs
-    /// attention.
+    /// attention, and a refresh that found nothing changed needs no words at all.
     public init(_ outcome: EditorOutcome) {
-        self = outcome.needsAttention ? .failure(outcome.description) : .success(outcome.description)
+        if outcome.needsAttention {
+            self = .failure(outcome.description)
+        } else if outcome.refresh?.wasUnchanged == true {
+            // Nothing was done and nothing needs saying: the fragment's bytes are
+            // untouched, and the source's row already names when it last
+            // refreshed. A line here would only tell the reader what they can
+            // already see.
+            self = .quiet
+        } else {
+            self = .success(outcome.description)
+        }
     }
 }
