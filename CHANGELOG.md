@@ -5,6 +5,18 @@ carries a higher build number than the one before it; published versions are
 never rewritten. A published version's section is what its release page carries,
 so it is not rewritten either — the next version says what changed.
 
+## 1.3.0 — 2026-09-21
+
+- A fragment can be fetched from a URL on its own interval and refreshed over
+  HTTPS, keeping the previous text when a fetch fails and applying a changed
+  block when the live file still matches the profile's rendering, or reporting
+  drift otherwise. (#2)
+- A profile or fragment name can hold a space, so a name like `Local Dev` is
+  created, listed and referenced. (#1)
+- Large hosts files cost far less memory: closing the window releases it and its
+  view tree, the application holds digests and counts rather than file bytes, and
+  the resolved block builds only the rows on screen.
+
 ## 1.2.0 — 2026-09-20
 
 A store of a hundred thousand entries is usable, and the resolved block fills the
