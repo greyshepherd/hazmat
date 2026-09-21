@@ -67,6 +67,17 @@ public struct ParsedFragment: Equatable, Sendable {
         }
     }
 
+    /// How many entries the fragment holds, counted in place: a row asks this of
+    /// a fragment of a hundred thousand lines on every read, and building the
+    /// entries to count them would cost an array of them each time.
+    public var entryCount: Int {
+        var count = 0
+        for item in items {
+            if case .entry = item { count += 1 }
+        }
+        return count
+    }
+
     public var removals: [Removal] {
         items.compactMap { item in
             switch item {

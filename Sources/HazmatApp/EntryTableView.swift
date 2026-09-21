@@ -8,16 +8,17 @@ import SwiftUI
 /// view identity, a trait array and an attribute subgraph per row — about
 /// 1.5 KB an entry, for every entry, whether or not it is visible.
 ///
-/// The rows are reloaded when the rendering they came from changes, so an
-/// update that carries the same block does not reload the table for nothing.
+/// The rows are built from the composition when the rendering they come from
+/// changes, so an update that carries the same block neither builds the lines
+/// again nor reloads the table.
 struct EntryTableView: NSViewRepresentable {
-    /// The block's entry lines, in order.
-    var entries: [BlockEntry]
-    /// The bytes the entries were rendered from: the identity a reload keys on.
+    /// The composition whose entry lines the rows are.
+    var composition: Composition
+    /// The bytes the composition rendered to: the identity a reload keys on.
     var rendering: Data?
 
     func makeCoordinator() -> Coordinator {
-        Coordinator(entries: entries, rendering: rendering)
+        Coordinator(entries: BlockRenderer.entries(composition), rendering: rendering)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
@@ -48,8 +49,8 @@ struct EntryTableView: NSViewRepresentable {
 
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         let coordinator = context.coordinator
-        guard coordinator.rendering != rendering || coordinator.entries.count != entries.count else { return }
-        coordinator.entries = entries
+        guard coordinator.rendering != rendering else { return }
+        coordinator.entries = BlockRenderer.entries(composition)
         coordinator.rendering = rendering
         coordinator.table?.reloadData()
     }

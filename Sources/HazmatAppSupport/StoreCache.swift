@@ -53,9 +53,15 @@ public final class StoreCache: StoreReadingCache, @unchecked Sendable {
 
         let value = try derive()
 
+        // Two readings can derive the same answer at once — the window's read
+        // and the menu's, at launch. The first to store wins and the other
+        // answers with it, so one composition is held rather than one each.
         lock.lock()
+        defer { lock.unlock() }
+        if let entry = derivations[slot], entry.key == key, let stored = entry.value as? T {
+            return stored
+        }
         derivations[slot] = (key, value)
-        lock.unlock()
         return value
     }
 

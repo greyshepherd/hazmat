@@ -204,7 +204,7 @@ public struct EditorModel: Sendable {
             layerRows: layerRows,
             resolved: resolved,
             renderedBlock: resolved.renderedBlock,
-            entryLines: resolved.composition.map(BlockRenderer.entries) ?? [],
+            entryCount: resolved.composition.map(BlockRenderer.entryCount) ?? 0,
             usingProfiles: selectedFragment.map { Self.profiles(using: $0, in: profiles, reading: reading) } ?? [],
             appliedProfiles: live.appliedProfiles,
             liveBlock: live.block,
@@ -269,7 +269,7 @@ public struct EditorModel: Sendable {
 
     /// The entries the fragment holds, as its sidebar row reports them.
     private static func entryCount(of fragment: FragmentID, in reading: StoreReading) -> Int {
-        reading.fragment(fragment)?.outcome.fragment.entries.count ?? 0
+        reading.fragment(fragment)?.entryCount ?? 0
     }
 
     /// Where the fragment comes from, or `nil` when it is an ordinary fragment.

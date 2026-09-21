@@ -1,14 +1,27 @@
 import Foundation
 
-/// One fragment as a reading holds it: the bytes that were read, and what they
-/// parsed to. The text is decoded only when something asks for it, because only
+/// One fragment as a reading holds it: the bytes that were read, how many
+/// entries they hold, and what they parsed to when a profile stacks the
+/// fragment. The text is decoded only when something asks for it, because only
 /// the editor's draft needs the whole file as a string.
 public struct FragmentReading: Equatable, Sendable {
     public let id: FragmentID
     public let bytes: Data
-    public let outcome: FragmentParser.Outcome
+    /// How many entries the fragment holds, as its rows show it.
+    public let entryCount: Int
+    /// The parse, held when some profile stacks the fragment, because composing
+    /// needs it. `nil` for a fragment nothing stacks: its count is all a read
+    /// asks of it, and a parse of a hundred thousand entries is not held for
+    /// one number.
+    public let outcome: FragmentParser.Outcome?
 
     public var text: String { String(decoding: bytes, as: UTF8.self) }
+}
+
+/// What a reading keeps of a fragment nothing stacks: the count its rows show.
+/// Cached in place of the parse, so the cache holds one or the other per file.
+struct FragmentSummary: Sendable {
+    let entryCount: Int
 }
 
 /// One profile as a reading holds it.
@@ -67,15 +80,8 @@ public struct StoreReading: Sendable {
         var profileGenerations: [ProfileID: Int] = [:]
         var listed: Set<URL> = []
 
-        for id in fragments {
-            let url = layout.fragmentURL(id)
-            listed.insert(url)
-            guard let bytes = try? Data(contentsOf: url) else { continue }
-            let cached = cache?.file(url, bytes: bytes) { parseFragment(bytes, id) }
-            fragmentGenerations[id] = cached?.generation ?? 0
-            fragmentReadings[id] = FragmentReading(id: id, bytes: bytes, outcome: cached?.value ?? parseFragment(bytes, id))
-        }
-
+        // The profiles first: which fragments they stack decides what a read
+        // keeps of each fragment.
         for id in profiles {
             let url = layout.profileURL(id)
             listed.insert(url)
@@ -83,6 +89,35 @@ public struct StoreReading: Sendable {
             let cached = cache?.file(url, bytes: bytes) { parseProfile(bytes, id) }
             profileGenerations[id] = cached?.generation ?? 0
             profileReadings[id] = ProfileReading(id: id, bytes: bytes, outcome: cached?.value ?? parseProfile(bytes, id))
+        }
+        var stacked: Set<FragmentID> = []
+        for profile in profileReadings.values {
+            for reference in profile.outcome.profile.references {
+                stacked.insert(reference.fragment)
+            }
+        }
+
+        for id in fragments {
+            let url = layout.fragmentURL(id)
+            listed.insert(url)
+            guard let bytes = try? Data(contentsOf: url) else { continue }
+            if stacked.contains(id) {
+                let cached = cache?.file(url, bytes: bytes) { parseFragment(bytes, id) }
+                let outcome = cached?.value ?? parseFragment(bytes, id)
+                fragmentGenerations[id] = cached?.generation ?? 0
+                fragmentReadings[id] = FragmentReading(
+                    id: id, bytes: bytes, entryCount: outcome.fragment.entryCount, outcome: outcome
+                )
+            } else {
+                // Asked of the cache as a summary, so a file whose parse was
+                // held while a profile stacked it is summarised in its place.
+                let cached = cache?.file(url, bytes: bytes) {
+                    FragmentSummary(entryCount: parseFragment(bytes, id).fragment.entryCount)
+                }
+                let summary = cached?.value ?? FragmentSummary(entryCount: parseFragment(bytes, id).fragment.entryCount)
+                fragmentGenerations[id] = cached?.generation ?? 0
+                fragmentReadings[id] = FragmentReading(id: id, bytes: bytes, entryCount: summary.entryCount, outcome: nil)
+            }
         }
 
         cache?.retainFiles(listed)
@@ -213,12 +248,15 @@ private final class Box: @unchecked Sendable {
         var problems = profile.outcome.problems
         var layers: [ParsedFragment] = []
         for reference in profile.outcome.profile.references {
-            guard let fragment = fragments[reference.fragment] else {
+            // A referenced fragment was read with its parse, since the
+            // profiles decided which were; `nil` here is a fragment the
+            // directory did not list.
+            guard let fragment = fragments[reference.fragment], let outcome = fragment.outcome else {
                 problems.append(.missingFragment(profile: id, line: reference.line, fragment: reference.fragment))
                 continue
             }
-            problems.append(contentsOf: fragment.outcome.problems)
-            layers.append(fragment.outcome.fragment)
+            problems.append(contentsOf: outcome.problems)
+            layers.append(outcome.fragment)
         }
         return try HostsComposer.compose(profile: id, layers: layers, problems: problems)
     }

@@ -7,16 +7,15 @@ import XCTest
 
 /// The resolved block's table is an `NSTableView` fed by a data source, so a
 /// block of a hundred thousand entries costs the rows on screen, not one view
-/// per entry.
+/// per entry. Its rows are built from the composition once per rendering, not
+/// on every look at the pane.
 @MainActor
 final class EntryTableViewTests: XCTestCase {
     func testTheTableShowsOneRowPerEntryWithItsAddressNamesAndSource() throws {
-        let entries = [
-            entry("127.0.0.1", ["localhost", "alpha.example"], line: 1),
-            entry("10.0.0.9", ["beta.example"], line: 2),
-            entry("::1", ["ip6-localhost"], line: 3)
-        ]
-        let host = Self.host(EntryTableView(entries: entries, rendering: Data("v1".utf8)))
+        let composition = try composition(
+            "127.0.0.1\tlocalhost alpha.example\n10.0.0.9\tbeta.example\n::1\tip6-localhost\n"
+        )
+        let host = Self.host(EntryTableView(composition: composition, rendering: Data("v1".utf8)))
         let table = try XCTUnwrap(Self.tableView(in: host))
 
         XCTAssertEqual(table.numberOfRows, 3)
@@ -27,10 +26,10 @@ final class EntryTableViewTests: XCTestCase {
     }
 
     func testAHundredThousandEntriesMaterialiseOnlyTheRowsOnScreen() throws {
-        let entries = (1...100_000).map { line in
-            entry("0.0.0.0", ["host\(line).example"], line: line)
-        }
-        let host = Self.host(EntryTableView(entries: entries, rendering: Data("v1".utf8)))
+        let composition = try composition(
+            (1...100_000).map { "0.0.0.0\thost\($0).example\n" }.joined()
+        )
+        let host = Self.host(EntryTableView(composition: composition, rendering: Data("v1".utf8)))
         let table = try XCTUnwrap(Self.tableView(in: host))
 
         XCTAssertEqual(table.numberOfRows, 100_000)
@@ -39,26 +38,22 @@ final class EntryTableViewTests: XCTestCase {
     }
 
     func testANewRenderingReloadsTheRows() throws {
-        let first = [entry("127.0.0.1", ["localhost"], line: 1)]
-        let second = first + [entry("10.0.0.9", ["beta.example"], line: 2)]
-        let host = Self.host(EntryTableView(entries: first, rendering: Data("v1".utf8)))
+        let first = try composition("127.0.0.1\tlocalhost\n")
+        let second = try composition("127.0.0.1\tlocalhost\n10.0.0.9\tbeta.example\n")
+        let host = Self.host(EntryTableView(composition: first, rendering: Data("v1".utf8)))
         let table = try XCTUnwrap(Self.tableView(in: host))
         XCTAssertEqual(table.numberOfRows, 1)
 
-        host.rootView = EntryTableView(entries: second, rendering: Data("v2".utf8))
+        host.rootView = EntryTableView(composition: second, rendering: Data("v2".utf8))
         host.layoutSubtreeIfNeeded()
         XCTAssertEqual(table.numberOfRows, 2)
     }
 
     // MARK: - Helpers
 
-    private func entry(_ address: String, _ names: [String], line: Int) -> BlockEntry {
-        BlockEntry(
-            address: address,
-            family: address.contains(":") ? .ipv6 : .ipv4,
-            names: names,
-            source: SourceLocation(fragment: FragmentID("base"), line: line)
-        )
+    private func composition(_ text: String) throws -> Composition {
+        let outcome = FragmentParser.parse(text, as: FragmentID("base"))
+        return try HostsComposer.compose(profile: ProfileID("work"), layers: [outcome.fragment], problems: outcome.problems)
     }
 
     private static func host(_ view: EntryTableView) -> NSHostingView<EntryTableView> {

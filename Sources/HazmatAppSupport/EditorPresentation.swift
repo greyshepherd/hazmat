@@ -224,8 +224,9 @@ public struct EditorPresentation: Equatable, Sendable {
     /// The block the selected profile renders, computed once by the read rather
     /// than on every look at it.
     public let renderedBlock: Data?
-    /// The block's entry lines: one row per address line the renderer writes.
-    public let entryLines: [BlockEntry]
+    /// How many entries the block would hold: one per address line. Counted by
+    /// the read; the lines themselves are built only when something asks.
+    public let entryCount: Int
     /// The profiles whose stack references the selected fragment.
     public let usingProfiles: [ProfileID]
     /// The profiles whose rendering is the live block.
@@ -260,8 +261,12 @@ public struct EditorPresentation: Equatable, Sendable {
     /// them.
     public var displacements: [Displacement] { resolved.displacements }
 
-    /// How many entries the block would hold: one per address line.
-    public var entryCount: Int { entryLines.count }
+    /// The block's entry lines: one row per address line the renderer writes.
+    /// Built on each call — a block of a hundred thousand lines is not
+    /// something to hold for a pane that shows a count.
+    public var entryLines: [BlockEntry] {
+        resolved.composition.map(BlockRenderer.entries) ?? []
+    }
 
     /// How many layers the selected profile stacks.
     public var layerCount: Int { layers.count }

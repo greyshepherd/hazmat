@@ -172,7 +172,7 @@ extension EditorPresentation {
             guard helper.canWrite else {
                 return .blocked(cause: helper.writeBlockCause, remedy: helper.remedy)
             }
-            return .pending(entries: entryLines.count)
+            return .pending(entries: entryCount)
         case .refused(let error):
             return .blocked(cause: "The live file's markers cannot be read: \(error)", remedy: nil)
         case .unreadable(let reason):

@@ -39,6 +39,15 @@ final class BlockRenderingTests: XCTestCase {
         XCTAssertEqualBytes(block, try Fixture.data("expected-work-block", ext: "txt"))
     }
 
+    /// The count of a block is asked far more often than the block's lines
+    /// are wanted, so it is counted without building them.
+    func testTheEntryCountIsTheNumberOfLinesTheRendererWrites() throws {
+        let composition = try workComposition()
+
+        XCTAssertEqual(BlockRenderer.entryCount(composition), BlockRenderer.entries(composition).count)
+        XCTAssertEqual(BlockRenderer.entryCount(composition), 5, "names one entry supplied share a line")
+    }
+
     func testEveryNameIsEmittedOncePerFamily() throws {
         let block = text(BlockRenderer.render(try workComposition()))
         let entries = block.split(separator: "\n").filter { !$0.hasPrefix("#") }

@@ -47,6 +47,25 @@ public enum BlockRenderer {
         return entries
     }
 
+    /// How many lines `entries` would hold, counted without building them: the
+    /// count is shown on every look at the block, the lines only in its table.
+    public static func entryCount(_ composition: Composition) -> Int {
+        var count = 0
+        var index = 0
+        while index < composition.resolved.count {
+            let first = composition.resolved[index]
+            var next = index + 1
+            while next < composition.resolved.count,
+                  composition.resolved[next].source == first.source,
+                  composition.resolved[next].family == first.family {
+                next += 1
+            }
+            count += 1
+            index = next
+        }
+        return count
+    }
+
     /// The block uses `\n` line endings and ends with one. Names come out in
     /// resolution order, grouped on one line when a single entry supplied them.
     public static func render(_ composition: Composition) -> Data {

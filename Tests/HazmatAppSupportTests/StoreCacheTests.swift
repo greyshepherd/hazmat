@@ -61,6 +61,80 @@ final class StoreCacheTests: XCTestCase {
         return reading
     }
 
+    // MARK: - One derivation per key
+
+    /// Two readings that derive the same answer at once — the window's read and
+    /// the menu's, at launch — end up sharing one value, not holding one each: a
+    /// composition of a hundred thousand names is not worth holding twice.
+    func testDerivationsThatRaceForTheSameKeyShareTheStoredValue() {
+        final class Derived: @unchecked Sendable {}
+        let cache = StoreCache()
+        let key = DerivationKey(profile: work, kind: .composition, generation: 1, layers: [base: 1])
+        let arrived = DispatchSemaphore(value: 0)
+        let proceed = DispatchSemaphore(value: 0)
+        let results = Results()
+        let group = DispatchGroup()
+
+        // Both derive: neither finishes deriving until the other is deriving too.
+        DispatchQueue.global().async {
+            arrived.wait()
+            arrived.wait()
+            proceed.signal()
+            proceed.signal()
+        }
+        for _ in 0..<2 {
+            DispatchQueue.global().async(group: group) {
+                let value: Derived = cache.derived(key) {
+                    arrived.signal()
+                    proceed.wait()
+                    return Derived()
+                }
+                results.append(value)
+            }
+        }
+        XCTAssertEqual(group.wait(timeout: .now() + 5), .success, "both derivations finished")
+
+        XCTAssertEqual(results.values.count, 2)
+        XCTAssertTrue(results.values[0] === results.values[1], "both answer with the value the cache stored")
+    }
+
+    private final class Results: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: [AnyObject] = []
+        var values: [AnyObject] { lock.withLock { stored } }
+        func append(_ value: AnyObject) { lock.withLock { stored.append(value) } }
+    }
+
+    // MARK: - A fragment nothing stacks
+
+    /// The cache holds a count for a fragment no profile stacks and a parse for
+    /// one some profile does, switching as the profiles change: stacking it
+    /// parses it once more, and unstacking it lets the parse go.
+    func testAFragmentNothingStacksIsHeldAsACountUntilAProfileStacksIt() throws {
+        let store = try makeStore()
+        defer { store.remove() }
+        try store.write("0.0.0.0\torphan.example\n", to: "fragments/orphan.hosts")
+        let cache = StoreCache()
+        let tally = ParseTally()
+
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 4, "counting the orphan is one parse")
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 4, "the count is reused")
+
+        try store.write("base\nads\norphan\n", to: "profiles/focus.profile")
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 5, "stacked, it is parsed in full")
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 5, "and the parse is reused")
+
+        try store.write("base\nads\n", to: "profiles/focus.profile")
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 6, "unstacked, the parse is let go and the count kept")
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 6)
+    }
+
     // MARK: - The same bytes
 
     func testTheSameBytesAreNotParsedAgain() throws {
@@ -98,14 +172,14 @@ final class StoreCacheTests: XCTestCase {
 
         let cache = StoreCache()
         let tally = ParseTally()
-        XCTAssertEqual(read(store, cache, tally).fragment(base)?.outcome.fragment.entries.count, 2)
+        XCTAssertEqual(read(store, cache, tally).fragment(base)?.entryCount, 2)
 
         try store.write(oneEntry, to: "fragments/base.hosts")
         try FileManager.default.setAttributes([.modificationDate: when], ofItemAtPath: url.path)
 
         let after = read(store, cache, tally)
 
-        XCTAssertEqual(after.fragment(base)?.outcome.fragment.entries.count, 1, "the new bytes are what was read")
+        XCTAssertEqual(after.fragment(base)?.entryCount, 1, "the new bytes are what was read")
         XCTAssertEqual(tally.fragments, 2, "a same-length rewrite in the same second is parsed again")
     }
 

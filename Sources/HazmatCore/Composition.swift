@@ -137,7 +137,14 @@ public struct HostsComposer: Sendable {
             }
         }
 
-        let resolved = supplied.indices.compactMap { superseded[$0] ? nil : supplied[$0] }
+        // Sized exactly: the survivors are held for as long as the profile is
+        // shown, and an array grown by appending would keep up to a second,
+        // empty copy of itself in reserved capacity.
+        var resolved: [ResolvedName] = []
+        resolved.reserveCapacity(superseded.lazy.filter { !$0 }.count)
+        for index in supplied.indices where !superseded[index] {
+            resolved.append(supplied[index])
+        }
         return Composition(profile: profile, resolved: resolved, displacements: displacements)
     }
 }

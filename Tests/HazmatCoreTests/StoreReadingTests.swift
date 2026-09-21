@@ -92,13 +92,13 @@ final class StoreReadingTests: XCTestCase {
         // The sidebar's rows, the layer rows and the composition's own report.
         for _ in 0..<3 {
             for id in reading.fragments {
-                _ = reading.fragment(id)?.outcome.fragment.entries.count
+                _ = reading.fragment(id)?.entryCount
             }
         }
 
         XCTAssertEqual(tally.fragments, 2, "a second question about a fragment is not a second parse")
-        XCTAssertEqual(reading.fragment(base)?.outcome.fragment.entries.count, 2)
-        XCTAssertEqual(reading.fragment(ads)?.outcome.fragment.entries.count, 1)
+        XCTAssertEqual(reading.fragment(base)?.entryCount, 2)
+        XCTAssertEqual(reading.fragment(ads)?.entryCount, 1)
     }
 
     func testTwoCompositionsAndThreeRenderingsCostNoFurtherParses() throws {
@@ -119,6 +119,26 @@ final class StoreReadingTests: XCTestCase {
 
         XCTAssertEqual(tally.fragments, 2, "composition reads the parse in hand")
         XCTAssertEqual(tally.profiles, 2)
+    }
+
+    /// A parse is held for a fragment some profile stacks, because composing
+    /// needs it. A fragment nothing stacks is counted for its row and its parse
+    /// let go: a blocklist of a hundred thousand entries that no profile uses
+    /// is not worth forty megabytes for one number.
+    func testAFragmentNothingStacksIsCountedButNotHeldParsed() throws {
+        let store = try store()
+        defer { store.remove() }
+        try store.write("0.0.0.0\tone.example\n0.0.0.0\ttwo.example\n# hazmat:remove gone.example\n", to: "fragments/orphan.hosts")
+        let tally = ParseTally()
+
+        let reading = reading(of: store, tally: tally)
+        let orphan = try XCTUnwrap(reading.fragment(FragmentID("orphan")))
+
+        XCTAssertEqual(orphan.entryCount, 2)
+        XCTAssertNil(orphan.outcome, "nothing stacks it, so its parse is not held")
+        XCTAssertNotNil(reading.fragment(base)?.outcome, "a stacked fragment's parse is held for composing")
+        XCTAssertEqual(reading.fragment(base)?.entryCount, 2)
+        XCTAssertEqual(tally.fragments, 3, "counting it is still one parse")
     }
 
     func testACopyOfAReadingSharesItsDerivations() throws {

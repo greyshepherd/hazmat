@@ -2,6 +2,19 @@ import XCTest
 @testable import HazmatCore
 
 final class CompositionTests: XCTestCase {
+    /// A composition is held for as long as its profile is shown, so its
+    /// resolved names are stored with no growth slack: an array grown by
+    /// appending can carry a second, empty copy of itself in reserved capacity.
+    func testTheResolvedNamesAreStoredWithoutSlack() throws {
+        let lines = (1...20_000).map { "0.0.0.0\thost\($0).example\n" }.joined()
+        let outcome = FragmentParser.parse(lines, as: FragmentID("big"))
+
+        let composition = try HostsComposer.compose(profile: ProfileID("work"), layers: [outcome.fragment])
+
+        XCTAssertEqual(composition.resolved.count, 20_000)
+        XCTAssertLessThanOrEqual(composition.resolved.capacity, 20_000 + 200, "no more than malloc's rounding")
+    }
+
     func testLaterLayerWinsAConflictingAddress() throws {
         let result = try composition(
             fragments: [

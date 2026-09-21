@@ -16,6 +16,18 @@ final class FragmentParsingTests: XCTestCase {
         XCTAssertEqual(entry.source, SourceLocation(fragment: base, line: 1))
     }
 
+    /// A fragment's entry count is shown on every row that names it, so it is
+    /// counted in place rather than by building the entries to count them.
+    func testTheEntryCountIsTheNumberOfEntriesAmongTheItems() {
+        let outcome = FragmentParser.parse(
+            "127.0.0.1\tlocalhost\n# hazmat:remove docs.internal\n::1\tapi.internal\nbad line\n",
+            as: FragmentID("base")
+        )
+
+        XCTAssertEqual(outcome.fragment.entryCount, 2)
+        XCTAssertEqual(outcome.fragment.entryCount, outcome.fragment.entries.count)
+    }
+
     func testCommentsBlankLinesAndMixedWhitespaceContributeNoEntries() {
         let source = "# a comment with  trailing spaces   \n"
             + "\n"

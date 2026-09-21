@@ -116,9 +116,12 @@ struct DetailPane: View {
     /// One row per address line: the address, the names on it, and the fragment
     /// that supplied it. An `NSTableView` behind a data source, so the rows on
     /// screen are the only ones that cost anything.
+    @ViewBuilder
     private func blockTable(_ editor: EditorPresentation) -> some View {
-        EntryTableView(entries: editor.entryLines, rendering: editor.rendering)
-            .frame(minHeight: 220, maxHeight: .infinity)
+        if let composition = editor.resolved.composition {
+            EntryTableView(composition: composition, rendering: editor.rendering)
+                .frame(minHeight: 220, maxHeight: .infinity)
+        }
     }
 
     private func problemRow(_ message: String) -> some View {
