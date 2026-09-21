@@ -88,6 +88,22 @@ as it is now rather than as it was.
 - A Mac with Apple silicon
 - macOS 15 (Sequoia) or later
 
+## Troubleshooting
+
+### An apply is refused because `/etc/hosts` carries an access-control list
+
+The window reports `the privileged side refused: the file carries an
+access-control list: /etc/hosts`, and the file is left exactly as it was.
+
+This usually happens because an ACL was applied to `/etc/hosts` by the user
+or another tool like Gas Mask.
+
+```sh
+ls -le /etc/hosts          # access-control entries print under the file
+sudo chmod -N /etc/hosts   # remove them
+ls -le /etc/hosts          # verify, then apply again
+```
+
 ## Documentation
 
 | Document | What it covers |
