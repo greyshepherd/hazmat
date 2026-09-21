@@ -15,7 +15,9 @@ renaming, duplicating, and deleting both, and MUST read the store when it is
 asked rather than presenting a cached list. Work derived from a file's bytes
 (its parse, a profile's composition, its rendered block) MAY be reused between
 reads only while the bytes read are identical; a file whose bytes changed MUST
-be parsed again on the next read.
+be parsed again on the next read. A fragment's parse MUST be held between reads
+only while some profile stacks it; for a fragment nothing stacks, only its entry
+count MAY be reused.
 
 #### Scenario: A file added outside the application
 - **WHEN** a fragment file is created by another tool and the window is refreshed
@@ -32,6 +34,14 @@ be parsed again on the next read.
 #### Scenario: A fragment rewritten with the same bytes
 - **WHEN** a fragment file is rewritten with byte-identical content and the window is refreshed
 - **THEN** the window reads the file and presents the same result, whether or not it parsed the bytes again
+
+#### Scenario: A large fragment no profile stacks
+- **WHEN** the store holds a fragment of 100,000 entries that no profile stacks
+- **THEN** its row states its entry count, and its parse is not held between reads
+
+#### Scenario: A profile comes to stack it
+- **WHEN** a profile is edited to stack that fragment
+- **THEN** the next read parses it and the profile composes over it
 
 ### Requirement: Fragment text is edited as text
 
