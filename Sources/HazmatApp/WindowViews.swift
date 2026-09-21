@@ -9,14 +9,32 @@ import SwiftUI
 struct WindowReader: NSViewRepresentable {
     let tell: (NSWindow?) -> Void
 
-    func makeNSView(context: Context) -> NSView {
-        let view = NSView()
-        DispatchQueue.main.async { tell(view.window) }
-        return view
+    func makeNSView(context: Context) -> ReportingView {
+        ReportingView(tell: tell)
     }
 
-    func updateNSView(_ nsView: NSView, context: Context) {
-        DispatchQueue.main.async { tell(nsView.window) }
+    func updateNSView(_ nsView: ReportingView, context: Context) {
+        nsView.tell = tell
+    }
+
+    /// Tells of its window the moment it is in one — or out of one — rather
+    /// than on a later update, which a window open since launch may never get
+    /// before it closes.
+    final class ReportingView: NSView {
+        var tell: (NSWindow?) -> Void
+
+        init(tell: @escaping (NSWindow?) -> Void) {
+            self.tell = tell
+            super.init(frame: .zero)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) { nil }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            tell(window)
+        }
     }
 }
 

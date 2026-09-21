@@ -47,10 +47,23 @@ public struct DerivationKey: Hashable, Sendable {
 /// A generation identifies a file's bytes and changes whenever they do, so
 /// anything keyed on generations is reused exactly while its inputs are
 /// unchanged and never otherwise.
+///
+/// Of each file the cache keeps two things: a summary every read wants (a
+/// fragment's entry count, a profile's parse), and — only while something has
+/// asked for it — the whole of what the bytes derived to (a fragment's parse).
+/// The parses and the compositions exist for a window that is showing them;
+/// releasing them keeps the bytes, the summaries and the renderings, which is
+/// what the menu and the schedule read.
 public protocol StoreReadingCache: Sendable {
-    /// The generation of a file's bytes, and what `derive` made of them.
-    /// `derive` runs only when the cached bytes differ from `bytes`.
-    func file<T>(_ url: URL, bytes: Data, derive: () -> T) -> (generation: Int, value: T)
+    /// Records a file's bytes and answers with their generation and summary.
+    /// `derive` runs only when the recorded bytes differ from `bytes`, and what
+    /// it made is summarised by `summarise` and held whole for `parse` when
+    /// `hold` says so.
+    func file<T, S>(_ url: URL, bytes: Data, derive: () -> T, summarise: (T) -> S, hold: Bool) -> (generation: Int, summary: S)
+
+    /// The whole of what `derive` makes of the file's recorded bytes: held from
+    /// an earlier derive, or derived now and held.
+    func parse<T>(_ url: URL, derive: () -> T) -> T
 
     /// What `derive` made of a derivation. `derive` runs only when `key` is not
     /// the key the stored value was derived from.
@@ -59,4 +72,8 @@ public protocol StoreReadingCache: Sendable {
     /// Keeps only the files named, so a file the store no longer lists stops
     /// being cached.
     func retainFiles(_ urls: Set<URL>)
+
+    /// Lets go of every parse and every composition, keeping the bytes, the
+    /// summaries and the renderings: what a read with no window showing needs.
+    func releaseParses()
 }

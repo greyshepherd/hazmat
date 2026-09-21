@@ -1,27 +1,16 @@
 import Foundation
 
-/// One fragment as a reading holds it: the bytes that were read, how many
-/// entries they hold, and what they parsed to when a profile stacks the
-/// fragment. The text is decoded only when something asks for it, because only
-/// the editor's draft needs the whole file as a string.
+/// One fragment as a reading holds it: the bytes that were read and how many
+/// entries they hold. The parse is asked of the reading separately, because
+/// only composing needs it. The text is decoded only when something asks for
+/// it, because only the editor's draft needs the whole file as a string.
 public struct FragmentReading: Equatable, Sendable {
     public let id: FragmentID
     public let bytes: Data
     /// How many entries the fragment holds, as its rows show it.
     public let entryCount: Int
-    /// The parse, held when some profile stacks the fragment, because composing
-    /// needs it. `nil` for a fragment nothing stacks: its count is all a read
-    /// asks of it, and a parse of a hundred thousand entries is not held for
-    /// one number.
-    public let outcome: FragmentParser.Outcome?
 
     public var text: String { String(decoding: bytes, as: UTF8.self) }
-}
-
-/// What a reading keeps of a fragment nothing stacks: the count its rows show.
-/// Cached in place of the parse, so the cache holds one or the other per file.
-struct FragmentSummary: Sendable {
-    let entryCount: Int
 }
 
 /// One profile as a reading holds it.
@@ -68,7 +57,7 @@ public struct StoreReading: Sendable {
     init(
         layout: StoreLayout,
         cache: (any StoreReadingCache)? = nil,
-        parseFragment: (Data, FragmentID) -> FragmentParser.Outcome,
+        parseFragment: @escaping @Sendable (Data, FragmentID) -> FragmentParser.Outcome,
         parseProfile: (Data, ProfileID) -> ProfileParser.Outcome
     ) {
         let fragments = layout.fragments()
@@ -76,19 +65,22 @@ public struct StoreReading: Sendable {
 
         var fragmentReadings: [FragmentID: FragmentReading] = [:]
         var fragmentGenerations: [FragmentID: Int] = [:]
+        var fragmentBytes: [FragmentID: Data] = [:]
+        var parses: [FragmentID: FragmentParser.Outcome] = [:]
         var profileReadings: [ProfileID: ProfileReading] = [:]
         var profileGenerations: [ProfileID: Int] = [:]
         var listed: Set<URL> = []
 
-        // The profiles first: which fragments they stack decides what a read
-        // keeps of each fragment.
+        // The profiles first: which fragments they stack decides whether a
+        // fragment's parse is worth holding for composing, or its count is all
+        // a read wants of it.
         for id in profiles {
             let url = layout.profileURL(id)
             listed.insert(url)
             guard let bytes = try? Data(contentsOf: url) else { continue }
-            let cached = cache?.file(url, bytes: bytes) { parseProfile(bytes, id) }
+            let cached = cache?.file(url, bytes: bytes, derive: { parseProfile(bytes, id) }, summarise: { $0 }, hold: false)
             profileGenerations[id] = cached?.generation ?? 0
-            profileReadings[id] = ProfileReading(id: id, bytes: bytes, outcome: cached?.value ?? parseProfile(bytes, id))
+            profileReadings[id] = ProfileReading(id: id, bytes: bytes, outcome: cached?.summary ?? parseProfile(bytes, id))
         }
         var stacked: Set<FragmentID> = []
         for profile in profileReadings.values {
@@ -101,23 +93,28 @@ public struct StoreReading: Sendable {
             let url = layout.fragmentURL(id)
             listed.insert(url)
             guard let bytes = try? Data(contentsOf: url) else { continue }
-            if stacked.contains(id) {
-                let cached = cache?.file(url, bytes: bytes) { parseFragment(bytes, id) }
-                let outcome = cached?.value ?? parseFragment(bytes, id)
-                fragmentGenerations[id] = cached?.generation ?? 0
-                fragmentReadings[id] = FragmentReading(
-                    id: id, bytes: bytes, entryCount: outcome.fragment.entryCount, outcome: outcome
+            fragmentBytes[id] = bytes
+            let entryCount: Int
+            if let cache {
+                let cached = cache.file(
+                    url,
+                    bytes: bytes,
+                    derive: { parseFragment(bytes, id) },
+                    summarise: { $0.fragment.entryCount },
+                    hold: stacked.contains(id)
                 )
+                fragmentGenerations[id] = cached.generation
+                entryCount = cached.summary
             } else {
-                // Asked of the cache as a summary, so a file whose parse was
-                // held while a profile stacked it is summarised in its place.
-                let cached = cache?.file(url, bytes: bytes) {
-                    FragmentSummary(entryCount: parseFragment(bytes, id).fragment.entryCount)
-                }
-                let summary = cached?.value ?? FragmentSummary(entryCount: parseFragment(bytes, id).fragment.entryCount)
-                fragmentGenerations[id] = cached?.generation ?? 0
-                fragmentReadings[id] = FragmentReading(id: id, bytes: bytes, entryCount: summary.entryCount, outcome: nil)
+                // With nothing to hold it across reads, the parse is made now
+                // and kept for this reading, so a count and a composition
+                // still share it.
+                let outcome = parseFragment(bytes, id)
+                parses[id] = outcome
+                fragmentGenerations[id] = 0
+                entryCount = outcome.fragment.entryCount
             }
+            fragmentReadings[id] = FragmentReading(id: id, bytes: bytes, entryCount: entryCount)
         }
 
         cache?.retainFiles(listed)
@@ -129,12 +126,24 @@ public struct StoreReading: Sendable {
             profiles: profileReadings,
             fragmentGenerations: fragmentGenerations,
             profileGenerations: profileGenerations,
+            parses: parses,
+            parseFragment: { id in
+                guard let bytes = fragmentBytes[id] else { return nil }
+                if let cache {
+                    return cache.parse(layout.fragmentURL(id)) { parseFragment(bytes, id) }
+                }
+                return parseFragment(bytes, id)
+            },
             cache: cache
         )
     }
 
     /// The fragment as it was read, or `nil` when the store held none.
     public func fragment(_ id: FragmentID) -> FragmentReading? { box.fragments[id] }
+
+    /// The fragment parsed, or `nil` when the store held none. Parsed once per
+    /// reading, and held across readings while the cache holds it.
+    public func parse(_ id: FragmentID) -> FragmentParser.Outcome? { box.parse(id) }
 
     /// The profile as it was read, or `nil` when the store held none.
     public func profile(_ id: ProfileID) -> ProfileReading? { box.profiles[id] }
@@ -163,9 +172,12 @@ private final class Box: @unchecked Sendable {
 
     private let fragmentGenerations: [FragmentID: Int]
     private let profileGenerations: [ProfileID: Int]
+    /// Parses the fragment's bytes as read, through the cache when there is one.
+    private let parseFragment: (FragmentID) -> FragmentParser.Outcome?
     private let cache: (any StoreReadingCache)?
 
     private let lock = NSLock()
+    private var parses: [FragmentID: FragmentParser.Outcome]
     private var compositions: [ProfileID: Composition] = [:]
     private var renderings: [ProfileID: Data] = [:]
 
@@ -174,13 +186,32 @@ private final class Box: @unchecked Sendable {
         profiles: [ProfileID: ProfileReading],
         fragmentGenerations: [FragmentID: Int],
         profileGenerations: [ProfileID: Int],
+        parses: [FragmentID: FragmentParser.Outcome],
+        parseFragment: @escaping (FragmentID) -> FragmentParser.Outcome?,
         cache: (any StoreReadingCache)?
     ) {
         self.fragments = fragments
         self.profiles = profiles
         self.fragmentGenerations = fragmentGenerations
         self.profileGenerations = profileGenerations
+        self.parses = parses
+        self.parseFragment = parseFragment
         self.cache = cache
+    }
+
+    func parse(_ id: FragmentID) -> FragmentParser.Outcome? {
+        lock.lock()
+        let done = parses[id]
+        lock.unlock()
+        if let done { return done }
+
+        guard let outcome = parseFragment(id) else { return nil }
+
+        lock.lock()
+        let stored = parses[id] ?? outcome
+        parses[id] = stored
+        lock.unlock()
+        return stored
     }
 
     func composition(of profile: ProfileID) throws -> Composition {
@@ -189,7 +220,7 @@ private final class Box: @unchecked Sendable {
         lock.unlock()
         if let done { return done }
 
-        let derive = { try Self.compose(profile: profile, fragments: self.fragments, profiles: self.profiles) }
+        let derive = { try self.compose(profile: profile) }
         let composition: Composition
         if let cache, let key = derivationKey(for: profile, kind: .composition) {
             composition = try cache.derived(key, derive: derive)
@@ -237,21 +268,14 @@ private final class Box: @unchecked Sendable {
         return DerivationKey(profile: profile, kind: kind, generation: generation, layers: layers)
     }
 
-    private static func compose(
-        profile id: ProfileID,
-        fragments: [FragmentID: FragmentReading],
-        profiles: [ProfileID: ProfileReading]
-    ) throws -> Composition {
+    private func compose(profile id: ProfileID) throws -> Composition {
         guard let profile = profiles[id] else {
             throw CompositionError([.missingProfile(id)])
         }
         var problems = profile.outcome.problems
         var layers: [ParsedFragment] = []
         for reference in profile.outcome.profile.references {
-            // A referenced fragment was read with its parse, since the
-            // profiles decided which were; `nil` here is a fragment the
-            // directory did not list.
-            guard let fragment = fragments[reference.fragment], let outcome = fragment.outcome else {
+            guard let outcome = parse(reference.fragment) else {
                 problems.append(.missingFragment(profile: id, line: reference.line, fragment: reference.fragment))
                 continue
             }

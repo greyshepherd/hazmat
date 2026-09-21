@@ -66,6 +66,17 @@ public enum BlockRenderer {
         return count
     }
 
+    /// How many entry lines a rendered block holds: its lines less the two
+    /// markers. Counted from the bytes, so a reader holding the block and not
+    /// the composition it came from still has the number.
+    public static func entryCount(in rendered: Data) -> Int {
+        var lines = 0
+        rendered.withUnsafeBytes { bytes in
+            for byte in bytes where byte == ASCII.lineFeed { lines += 1 }
+        }
+        return max(lines - 2, 0)
+    }
+
     /// The block uses `\n` line endings and ends with one. Names come out in
     /// resolution order, grouped on one line when a single entry supplied them.
     public static func render(_ composition: Composition) -> Data {

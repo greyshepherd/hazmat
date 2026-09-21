@@ -44,14 +44,15 @@ struct ShellWorld {
     }
 
     @MainActor
-    func model(read: StoreRead? = nil) -> ShellModel {
+    func model(showing: Bool = true, read: StoreRead? = nil) -> ShellModel {
         build(
             writer: SilentWriter(),
             presence: SilentPresence(),
             fetcher: ScriptedFetcher(.refused("no exchange was scripted")),
             clock: { Date() },
             registrationState: { .notRegistered },
-            read: read
+            read: read,
+            showing: showing
         )
     }
 
@@ -100,6 +101,9 @@ struct ShellWorld {
         )
     }
 
+    /// A model as the tests of the window's behaviour start from: its window
+    /// showing, so the first read is in full. `showing: false` is a model that
+    /// launched into the menu bar with no window.
     @MainActor
     private func build(
         writer: PrivilegedWriter,
@@ -107,7 +111,8 @@ struct ShellWorld {
         fetcher: any RemoteFetching,
         clock: @escaping @Sendable () -> Date,
         registrationState: @escaping HelperRegistrationState,
-        read: StoreRead?
+        read: StoreRead?,
+        showing: Bool = true
     ) -> ShellModel {
         ShellModel(
             fileURL: liveURL,
@@ -118,7 +123,8 @@ struct ShellWorld {
             fetcher: fetcher,
             clock: clock,
             registrationState: registrationState,
-            read: read
+            read: read,
+            windowShowing: showing
         )
     }
 

@@ -105,12 +105,45 @@ final class StoreCacheTests: XCTestCase {
         func append(_ value: AnyObject) { lock.withLock { stored.append(value) } }
     }
 
-    // MARK: - A fragment nothing stacks
+    // MARK: - Parses are held only while the window needs them
 
-    /// The cache holds a count for a fragment no profile stacks and a parse for
-    /// one some profile does, switching as the profiles change: stacking it
-    /// parses it once more, and unstacking it lets the parse go.
-    func testAFragmentNothingStacksIsHeldAsACountUntilAProfileStacksIt() throws {
+    /// A read the menu asks for — counts and renderings, no composition — parses
+    /// nothing after a release while the bytes are unchanged: the renderings and
+    /// the counts are kept, the parses are not. A read that composes parses
+    /// again, once per layer.
+    func testReleasingTheParsesKeepsTheCountsAndRenderings() throws {
+        let store = try makeStore()
+        defer { store.remove() }
+        let cache = StoreCache()
+        let tally = ParseTally()
+
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 3)
+
+        cache.releaseParses()
+
+        let menuRead = StoreReading(layout: StoreLayout(root: store.root), cache: cache, parseFragment: { bytes, id in
+            tally.countFragment()
+            return FragmentParser.parse(bytes, as: id)
+        }, parseProfile: { bytes, id in ProfileParser.parse(bytes, as: id) })
+        for fragment in menuRead.fragments {
+            _ = menuRead.fragment(fragment)?.entryCount
+        }
+        for profile in menuRead.profiles {
+            _ = try menuRead.rendering(of: profile)
+        }
+        XCTAssertEqual(tally.fragments, 3, "counts and renderings are answered without a parse")
+        XCTAssertEqual(menuRead.fragment(base)?.entryCount, 1)
+
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 6, "composing again parses each stacked fragment once")
+        read(store, cache, tally)
+        XCTAssertEqual(tally.fragments, 6, "and holds them until the next release")
+    }
+
+    /// A fragment no profile stacks is parsed once for its count and not held;
+    /// stacking it parses it once more, for composing.
+    func testAFragmentNothingStacksIsCountedWithoutHoldingItsParse() throws {
         let store = try makeStore()
         defer { store.remove() }
         try store.write("0.0.0.0\torphan.example\n", to: "fragments/orphan.hosts")
@@ -124,15 +157,9 @@ final class StoreCacheTests: XCTestCase {
 
         try store.write("base\nads\norphan\n", to: "profiles/focus.profile")
         read(store, cache, tally)
-        XCTAssertEqual(tally.fragments, 5, "stacked, it is parsed in full")
+        XCTAssertEqual(tally.fragments, 5, "stacked, it is parsed for composing")
         read(store, cache, tally)
-        XCTAssertEqual(tally.fragments, 5, "and the parse is reused")
-
-        try store.write("base\nads\n", to: "profiles/focus.profile")
-        read(store, cache, tally)
-        XCTAssertEqual(tally.fragments, 6, "unstacked, the parse is let go and the count kept")
-        read(store, cache, tally)
-        XCTAssertEqual(tally.fragments, 6)
+        XCTAssertEqual(tally.fragments, 5, "and the parse is held")
     }
 
     // MARK: - The same bytes

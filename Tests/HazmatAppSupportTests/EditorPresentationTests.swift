@@ -27,6 +27,40 @@ final class EditorPresentationTests: XCTestCase {
         )
     }
 
+    // MARK: - A read for a window that is not showing
+
+    /// With no window showing, a read carries what the menu and the schedule
+    /// need — the rendered block, its entry count, what the live file holds —
+    /// and not the composition or the fragment's text, which only the panes
+    /// show and which are what a large fragment costs.
+    func testAReadWithoutDetailCarriesTheRenderingButNotTheCompositionOrTheText() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        let model = fixture.model(writer: UnregisteredHelper())
+        let full = model.read(selection: .profile(work))
+
+        let slim = model.read(selection: .profile(work), detail: false)
+
+        XCTAssertEqual(slim.rendering, full.rendering)
+        XCTAssertEqual(slim.entryCount, full.entryCount)
+        XCTAssertEqual(slim.live, full.live)
+        XCTAssertEqual(slim.appliedProfiles, full.appliedProfiles)
+        XCTAssertEqual(slim.profileRows, full.profileRows)
+        XCTAssertEqual(slim.fragmentRows, full.fragmentRows)
+        XCTAssertEqual(slim.layers, full.layers)
+        XCTAssertFalse(slim.hasDetail)
+        XCTAssertTrue(full.hasDetail)
+        XCTAssertNil(slim.resolved.composition, "the composition is the panes' alone")
+        XCTAssertTrue(slim.entries.isEmpty)
+        XCTAssertTrue(slim.problems.isEmpty)
+        XCTAssertEqual(slim.writeState(helper: .notRegistered), full.writeState(helper: .notRegistered))
+
+        let fragment = model.read(selection: .fragment(project), detail: false)
+        XCTAssertEqual(fragment.selectedFragment, project)
+        XCTAssertEqual(fragment.fragmentText, "", "the text is decoded for the editor, not for a closed window")
+        XCTAssertEqual(fragment.stacks(project), [work])
+    }
+
     // MARK: - 1.3 The hosts file path, the entry count and the layer count
 
     func testThePresentationNamesTheLiveFileAndCountsTheProfile() throws {

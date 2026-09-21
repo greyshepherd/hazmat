@@ -121,24 +121,20 @@ final class StoreReadingTests: XCTestCase {
         XCTAssertEqual(tally.profiles, 2)
     }
 
-    /// A parse is held for a fragment some profile stacks, because composing
-    /// needs it. A fragment nothing stacks is counted for its row and its parse
-    /// let go: a blocklist of a hundred thousand entries that no profile uses
-    /// is not worth forty megabytes for one number.
-    func testAFragmentNothingStacksIsCountedButNotHeldParsed() throws {
+    /// A reading answers a fragment's count from the parse it made, and hands
+    /// the parse itself to whatever composes: the one parse serves both.
+    func testTheParseThatCountedAFragmentIsTheOneComposingUses() throws {
         let store = try store()
         defer { store.remove() }
-        try store.write("0.0.0.0\tone.example\n0.0.0.0\ttwo.example\n# hazmat:remove gone.example\n", to: "fragments/orphan.hosts")
         let tally = ParseTally()
-
         let reading = reading(of: store, tally: tally)
-        let orphan = try XCTUnwrap(reading.fragment(FragmentID("orphan")))
 
-        XCTAssertEqual(orphan.entryCount, 2)
-        XCTAssertNil(orphan.outcome, "nothing stacks it, so its parse is not held")
-        XCTAssertNotNil(reading.fragment(base)?.outcome, "a stacked fragment's parse is held for composing")
         XCTAssertEqual(reading.fragment(base)?.entryCount, 2)
-        XCTAssertEqual(tally.fragments, 3, "counting it is still one parse")
+        XCTAssertEqual(reading.parse(base)?.fragment.entryCount, 2)
+        XCTAssertNil(reading.parse(FragmentID("missing")))
+        _ = try reading.composition(of: focus)
+
+        XCTAssertEqual(tally.fragments, 2, "counting, asking for the parse and composing share one parse per fragment")
     }
 
     func testACopyOfAReadingSharesItsDerivations() throws {

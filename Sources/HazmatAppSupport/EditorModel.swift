@@ -126,9 +126,15 @@ public struct EditorModel: Sendable {
     /// what the live file holds. Every answer comes from one reading of the
     /// store, so a fragment is parsed once and a profile is composed and
     /// rendered once, however many rows and views ask a question of it.
+    ///
+    /// `detail` is what only the panes show: the selected profile's composition
+    /// and the selected fragment's text. A read for a window that is not
+    /// showing passes `false` and carries the rendered block without them, so
+    /// nothing of a large fragment is decoded or composed for a menu.
     public func read(
         selection: SidebarSelection? = nil,
-        search: StoreSearch = .none
+        search: StoreSearch = .none,
+        detail: Bool = true
     ) -> EditorPresentation {
         let reading = StoreReading(layout: layout, cache: cache)
         let profiles = reading.profiles
@@ -145,7 +151,7 @@ public struct EditorModel: Sendable {
         let selectedProfile = resolvedSelection.selectedProfile ?? (selection == nil ? matchingProfiles.first : nil)
         let selectedFragment = resolvedSelection.selectedFragment ?? (selection == nil ? matchingFragments.first : nil)
 
-        let selectedFragmentText = selectedFragment.flatMap { reading.fragment($0)?.text } ?? ""
+        let selectedFragmentText = detail ? selectedFragment.flatMap { reading.fragment($0)?.text } ?? "" : ""
 
         var layers: [FragmentID] = []
         var layerRows: [LayerRow] = []
@@ -160,10 +166,13 @@ public struct EditorModel: Sendable {
         let resolved: ResolvedView
         if let selectedProfile {
             do {
-                resolved = .composed(
-                    try reading.composition(of: selectedProfile),
-                    rendering: try reading.rendering(of: selectedProfile)
-                )
+                // The rendering is derived through the composition, but is
+                // reused across reads on its own, so a read without detail
+                // composes nothing while the bytes are unchanged.
+                let rendering = try reading.rendering(of: selectedProfile)
+                resolved = detail
+                    ? .composed(try reading.composition(of: selectedProfile), rendering: rendering)
+                    : .rendered(rendering)
             } catch let error as CompositionError {
                 resolved = .unresolvable(error.problems)
             } catch {
@@ -207,8 +216,9 @@ public struct EditorModel: Sendable {
             layers: layers,
             layerRows: layerRows,
             resolved: resolved,
+            hasDetail: detail,
             renderedBlock: resolved.renderedBlock,
-            entryCount: resolved.composition.map(BlockRenderer.entryCount) ?? 0,
+            entryCount: resolved.renderedBlock.map(BlockRenderer.entryCount(in:)) ?? 0,
             usingProfiles: selectedFragment.map { Self.profiles(using: $0, in: profiles, reading: reading) } ?? [],
             appliedProfiles: live.appliedProfiles,
             liveBlock: live.block,

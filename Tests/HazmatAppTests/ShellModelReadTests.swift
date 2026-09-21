@@ -14,7 +14,7 @@ final class ShellModelReadTests: XCTestCase {
         defer { world.remove() }
         let counter = ReadCounter()
 
-        let model = world.model { session, selection, search, activation in
+        let model = world.model { session, selection, search, activation, _ in
             counter.bump()
             if selection == .fragment(world.base) {
                 try? await Task.sleep(for: .milliseconds(150))
@@ -47,7 +47,7 @@ final class ShellModelReadTests: XCTestCase {
         defer { world.remove() }
         let counter = ReadCounter()
 
-        let model = world.model { session, selection, search, activation in
+        let model = world.model { session, selection, search, activation, _ in
             counter.bump()
             try? await Task.sleep(for: .milliseconds(20))
             return (
@@ -78,7 +78,7 @@ final class ShellModelReadTests: XCTestCase {
         let world = try ShellWorld()
         defer { world.remove() }
 
-        let model = world.model { session, selection, search, activation in
+        let model = world.model { session, selection, search, activation, _ in
             try? await Task.sleep(for: .milliseconds(60))
             return (
                 editor: session.editor.read(selection: selection, search: search),
@@ -108,7 +108,7 @@ final class ShellModelReadTests: XCTestCase {
         let counter = ReadCounter()
         let gate = Gate()
 
-        let model = world.model { session, selection, search, activation in
+        let model = world.model { session, selection, search, activation, _ in
             counter.bump()
             await gate.wait()
             return (

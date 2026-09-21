@@ -1,8 +1,9 @@
 import Foundation
 import HazmatCore
 
-/// What a reading reuses across reads: the parse of each file whose bytes came
-/// back identical, and the compositions and renderings derived from them.
+/// What a reading reuses across reads: of each file whose bytes came back
+/// identical, its summary and — while a window is composing over it — its
+/// parse; and the compositions and renderings derived from them.
 ///
 /// Nothing is presented from the cache: a read always reads the file. The cache
 /// is consulted only about bytes that came back byte-identical, so a same-second,
@@ -15,7 +16,10 @@ public final class StoreCache: StoreReadingCache, @unchecked Sendable {
     private struct FileEntry {
         let bytes: Data
         let generation: Int
-        let value: Any
+        let summary: Any
+        /// The whole parse, held while something asked for it and let go by a
+        /// release.
+        var parse: Any?
     }
 
     private let lock = NSLock()
@@ -25,21 +29,47 @@ public final class StoreCache: StoreReadingCache, @unchecked Sendable {
 
     public init() {}
 
-    public func file<T>(_ url: URL, bytes: Data, derive: () -> T) -> (generation: Int, value: T) {
+    public func file<T, S>(
+        _ url: URL,
+        bytes: Data,
+        derive: () -> T,
+        summarise: (T) -> S,
+        hold: Bool
+    ) -> (generation: Int, summary: S) {
         lock.lock()
-        if let entry = files[url], entry.bytes == bytes, let value = entry.value as? T {
+        if let entry = files[url], entry.bytes == bytes, let summary = entry.summary as? S {
             lock.unlock()
-            return (entry.generation, value)
+            return (entry.generation, summary)
+        }
+        lock.unlock()
+
+        let value = derive()
+        let summary = summarise(value)
+
+        lock.lock()
+        let generation = nextGeneration()
+        files[url] = FileEntry(bytes: bytes, generation: generation, summary: summary, parse: hold ? value : nil)
+        lock.unlock()
+        return (generation, summary)
+    }
+
+    public func parse<T>(_ url: URL, derive: () -> T) -> T {
+        lock.lock()
+        if let held = files[url]?.parse as? T {
+            lock.unlock()
+            return held
         }
         lock.unlock()
 
         let value = derive()
 
         lock.lock()
-        let generation = nextGeneration()
-        files[url] = FileEntry(bytes: bytes, generation: generation, value: value)
-        lock.unlock()
-        return (generation, value)
+        defer { lock.unlock() }
+        if let held = files[url]?.parse as? T {
+            return held
+        }
+        files[url]?.parse = value
+        return value
     }
 
     public func derived<T>(_ key: DerivationKey, derive: () throws -> T) rethrows -> T {
@@ -69,6 +99,21 @@ public final class StoreCache: StoreReadingCache, @unchecked Sendable {
         lock.lock()
         files = files.filter { urls.contains($0.key) }
         lock.unlock()
+    }
+
+    public func releaseParses() {
+        lock.lock()
+        for url in files.keys {
+            files[url]?.parse = nil
+        }
+        derivations = derivations.filter { $0.key.kind != .composition }
+        lock.unlock()
+    }
+
+    /// The files whose parse is held. Not part of its contract: the suite reads
+    /// it to show what a release let go of.
+    var heldParses: Set<URL> {
+        lock.withLock { Set(files.filter { $0.value.parse != nil }.keys) }
     }
 
     /// The files the cache holds. Not part of its contract: the suite reads it

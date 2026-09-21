@@ -36,6 +36,11 @@ public enum ResolvedView: Equatable, Sendable {
     /// The profile composed, with the block it renders: rendered once when the
     /// profile was read rather than on every look at it.
     case composed(Composition, rendering: Data)
+    /// The block the profile renders, without the composition it came from:
+    /// what a read keeps when no window is showing the composition. The block
+    /// is what the menu compares with the live file; the composition of a large
+    /// profile is what the panes cost.
+    case rendered(Data)
     /// The profile cannot be resolved; it is reported rather than shown as a
     /// partial or empty result.
     case unresolvable([CompositionProblem])
@@ -60,8 +65,10 @@ public enum ResolvedView: Equatable, Sendable {
 
     /// The block the profile renders, or `nil` when it cannot be resolved.
     public var renderedBlock: Data? {
-        guard case .composed(_, let rendering) = self else { return nil }
-        return rendering
+        switch self {
+        case .composed(_, let rendering), .rendered(let rendering): return rendering
+        case .unresolvable: return nil
+        }
     }
 }
 
@@ -234,6 +241,10 @@ public struct EditorPresentation: Equatable, Sendable {
     public let layerRows: [LayerRow]
     /// The selected profile composed once, and rendered.
     public let resolved: ResolvedView
+    /// Whether the read carried the panes' detail — the selected profile's
+    /// composition and the selected fragment's text — or was read for a window
+    /// that is not showing.
+    public let hasDetail: Bool
     /// The block the selected profile renders, computed once by the read rather
     /// than on every look at it.
     public let renderedBlock: Data?

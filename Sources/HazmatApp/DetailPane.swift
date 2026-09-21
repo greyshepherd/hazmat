@@ -83,7 +83,10 @@ struct DetailPane: View {
             }
         }
 
-        if editor.rendering != nil {
+        // The block is shown from a read that carried the composition. A read
+        // for a window that is not showing carries the rendering alone, and a
+        // pane nobody sees decodes nothing from it.
+        if let composition = editor.resolved.composition {
             let count = editor.entryCount
             Text(EntryCount.phrase(count))
                 .font(.caption)
@@ -93,7 +96,8 @@ struct DetailPane: View {
             case .text:
                 blockText(editor)
             case .table:
-                blockTable(editor)
+                EntryTableView(composition: composition, rendering: editor.rendering)
+                    .frame(minHeight: 220, maxHeight: .infinity)
             }
         }
 
@@ -111,17 +115,6 @@ struct DetailPane: View {
             .overlay {
                 RoundedRectangle(cornerRadius: 6).strokeBorder(Color(nsColor: .separatorColor))
             }
-    }
-
-    /// One row per address line: the address, the names on it, and the fragment
-    /// that supplied it. An `NSTableView` behind a data source, so the rows on
-    /// screen are the only ones that cost anything.
-    @ViewBuilder
-    private func blockTable(_ editor: EditorPresentation) -> some View {
-        if let composition = editor.resolved.composition {
-            EntryTableView(composition: composition, rendering: editor.rendering)
-                .frame(minHeight: 220, maxHeight: .infinity)
-        }
     }
 
     private func problemRow(_ message: String) -> some View {

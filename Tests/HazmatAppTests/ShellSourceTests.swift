@@ -157,7 +157,7 @@ final class ShellSourceTests: XCTestCase {
             return .succeeded(body: freshBody, finalURL: url)
         }
         let reads = ReadCounter()
-        let model = world.model(fetcher: fetcher, clock: { clock.now }, read: { session, selection, search, activation in
+        let model = world.model(fetcher: fetcher, clock: { clock.now }, read: { session, selection, search, activation, _ in
             reads.bump()
             return (session.editor.read(selection: selection, search: search), nil)
         })

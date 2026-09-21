@@ -46,6 +46,8 @@ final class BlockRenderingTests: XCTestCase {
 
         XCTAssertEqual(BlockRenderer.entryCount(composition), BlockRenderer.entries(composition).count)
         XCTAssertEqual(BlockRenderer.entryCount(composition), 5, "names one entry supplied share a line")
+        XCTAssertEqual(BlockRenderer.entryCount(in: BlockRenderer.render(composition)), 5, "and the bytes count the same")
+        XCTAssertEqual(BlockRenderer.entryCount(in: Data()), 0)
     }
 
     func testEveryNameIsEmittedOncePerFamily() throws {
