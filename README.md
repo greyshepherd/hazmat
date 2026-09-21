@@ -18,7 +18,7 @@ menu bar. It is inspired from
 Apple Silicon.
 
 <p align="center">
-  <img src="Assets/screenshot.png" alt="The Hazmat window: profiles and fragments on the left, the work profile's two layers in the middle, and the 46 entries they resolve to on the right" width="85%">
+  <img src="Assets/screenshot.png" alt="The Hazmat window: profiles and fragments on the left, one fragment fetched from someonewhocares.org, the work profile's two layers in the middle, and the 13,098 entries they resolve to on the right" width="85%">
 </p>
 
 **Disclaimer**: This codebase was built entirely by pairing with an AI agent — no code was handwritten by a human.
