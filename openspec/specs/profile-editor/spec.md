@@ -260,7 +260,8 @@ names and source fragment, MUST state the number of entries, MUST report
 displaced entries and problems, and MUST write nothing while it is shown. Each of
 these views MUST remain usable when the block holds 100,000 or more entries or
 the displaced list holds tens of thousands of entries: the pane MUST lay out
-only what is visible and MUST NOT stall the window to show them.
+only what is visible, MUST NOT stall the window to show them, and MUST NOT hold
+a view for an entry that is not on screen.
 
 #### Scenario: Text view
 - **WHEN** the resolved block is shown as text
@@ -285,6 +286,10 @@ only what is visible and MUST NOT stall the window to show them.
 #### Scenario: A block of a hundred thousand entries
 - **WHEN** the selected profile resolves to 100,000 entries and 50,000 displaced entries
 - **THEN** the text view, the table view and the displaced list each open and scroll without stalling the window, and the entry count is stated
+
+#### Scenario: A table of a hundred thousand entries
+- **WHEN** the resolved block of 100,000 entries is shown as a table
+- **THEN** the table reports 100,000 rows and holds views for the rows on screen only
 
 ### Requirement: Search narrows the store without hiding the selection
 
