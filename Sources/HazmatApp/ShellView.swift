@@ -14,10 +14,10 @@ struct ShellView: View {
         NavigationSplitView(columnVisibility: columnVisibility) {
             SidebarView(model: model)
         } content: {
-            // The layers pane opens at its minimum so the resolved block takes the
-            // room, and the divider widens it when a long layer list needs it.
+            // The layers pane opens at the width a layer list reads at, and the
+            // divider narrows it to its minimum or widens it for a long list.
             ContentPane(model: model)
-                .navigationSplitViewColumnWidth(min: 200, ideal: 200)
+                .navigationSplitViewColumnWidth(min: 200, ideal: 350)
         } detail: {
             DetailPane(model: model)
                 .navigationSplitViewColumnWidth(min: 400, ideal: 600)
