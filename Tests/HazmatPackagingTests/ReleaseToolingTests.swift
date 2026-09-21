@@ -350,25 +350,27 @@ final class ReleaseToolingTests: XCTestCase {
     }
 
     func testPublishingRefusesABuildNumberTheFeedAlreadyCarries() throws {
+        let build = try XCTUnwrap(try releaseConfiguration()["buildNumber"] as? Int, "buildNumber")
         let refused = try run("publish.sh", [
             "--artifact", try artifact().path,
-            "--published", try publishedFeed(carrying: [1, 4]).path,
+            "--published", try publishedFeed(carrying: [1, build]).path,
             "--dry-run"
         ])
 
         XCTAssertNotEqual(refused.status, 0)
-        XCTAssertTrue(refused.output.contains("not greater than 4"), refused.output)
+        XCTAssertTrue(refused.output.contains("not greater than \(build)"), refused.output)
     }
 
     func testPublishingRefusesABuildNumberSmallerThanThePublishedOne() throws {
+        let build = try XCTUnwrap(try releaseConfiguration()["buildNumber"] as? Int, "buildNumber")
         let refused = try run("publish.sh", [
             "--artifact", try artifact().path,
-            "--published", try publishedFeed(carrying: [7]).path,
+            "--published", try publishedFeed(carrying: [build + 3]).path,
             "--dry-run"
         ])
 
         XCTAssertNotEqual(refused.status, 0)
-        XCTAssertTrue(refused.output.contains("not greater than 7"), refused.output)
+        XCTAssertTrue(refused.output.contains("not greater than \(build + 3)"), refused.output)
     }
 
     func testPublishingWithoutATokenStopsBeforeUploadingAnything() throws {
