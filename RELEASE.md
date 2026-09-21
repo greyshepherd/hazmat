@@ -28,6 +28,19 @@ pinned Sparkle tools, the one-time setup a first release needs, the inventory
 of what is secret and where it lives, and the upgrade an installed copy must
 be shown to accept.
 
+## The changelog section
+
+The section is read by people deciding whether to install the update, so it is
+written for them:
+
+- One bullet per major change or feature, and a sentence or two per bullet. A
+  version with one change gets one bullet.
+- No numbers from the machine it was written on. A store's entry count, a file
+  size and a measured figure mean nothing to a reader: "large hosts files cost
+  far less memory" is the bullet, and the store it was measured on is not.
+- What a user will meet belongs in the bullet: what a failed refresh leaves
+  behind, what happens to the live file when a refresh changes the text.
+
 Three consumers follow a release. Installed copies read the feed, the release
 page carries the image, and the Homebrew tap at
 [greyshepherd/homebrew-tap](https://github.com/greyshepherd/homebrew-tap) reads
