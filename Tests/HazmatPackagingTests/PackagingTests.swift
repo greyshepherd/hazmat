@@ -115,4 +115,18 @@ final class PackagingTests: XCTestCase {
             "Licenses/README.md does not name the pinned version \(version)"
         )
     }
+
+    /// The application is launched in malloc's space-efficient mode, declared
+    /// by the bundle so LaunchServices sets it before the process starts:
+    /// what the window's close frees goes back to the system, not into
+    /// malloc's large-block cache, which is what a menu bar application
+    /// would otherwise sit on. Measured: 42 MB closed against 82–186 MB.
+    func testTheBundleLaunchesTheApplicationInMallocsSpaceEfficientMode() throws {
+        let assembler = try String(contentsOf: repositoryRoot().appendingPathComponent("Scripts/assemble-bundle.sh"), encoding: .utf8)
+        let verifier = try String(contentsOf: repositoryRoot().appendingPathComponent("Scripts/verify-bundle.sh"), encoding: .utf8)
+
+        let declaration = "<key>LSEnvironment</key>\n    <dict>\n        <key>MallocSpaceEfficient</key>\n        <string>1</string>\n    </dict>"
+        XCTAssertTrue(assembler.contains(declaration), "the assembler declares the mode in the property list")
+        XCTAssertTrue(verifier.contains("LSEnvironment:MallocSpaceEfficient"), "the verifier checks for it")
+    }
 }

@@ -11,7 +11,6 @@ import SwiftUI
 /// is opened.
 struct StatusMenu: View {
     let model: ShellModel
-    @Environment(\.openWindow) private var openWindow
 
     var body: some View {
         let menu = model.menu
@@ -64,8 +63,7 @@ struct StatusMenu: View {
         case .checkForUpdates:
             model.checkForUpdates()
         case .openWindow:
-            model.windowOpened()
-            openWindow(id: HazmatApp.windowID)
+            model.showWindow()
         case .quit:
             NSApp.terminate(nil)
         }

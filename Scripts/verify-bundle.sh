@@ -103,6 +103,11 @@ plutil -lint "$DAEMON_PLIST" > /dev/null || fail "the daemon property list is no
     || fail "the bundle names icon '$(read_plist "$INFO_PLIST" CFBundleIconFile)'"
 [ "$(read_plist "$INFO_PLIST" LSMinimumSystemVersion)" = "$MINIMUM_SYSTEM_VERSION" ] \
     || fail "the bundle declares minimum system version '$(read_plist "$INFO_PLIST" LSMinimumSystemVersion)'"
+# The application is launched in malloc's space-efficient mode: what it frees
+# goes back to the system rather than into malloc's caches, which is what
+# keeps an application that lives in the menu bar small once its window closes.
+[ "$(read_plist "$INFO_PLIST" "LSEnvironment:MallocSpaceEfficient")" = "1" ] \
+    || fail "the bundle does not launch the application in malloc's space-efficient mode"
 
 [ "$(read_plist "$DAEMON_PLIST" Label)" = "$DAEMON_LABEL" ] || fail "the daemon property list names another label"
 [ "$(read_plist "$DAEMON_PLIST" BundleProgram)" = "Contents/MacOS/$DAEMON_EXECUTABLE" ] \

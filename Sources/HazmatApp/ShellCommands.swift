@@ -6,7 +6,6 @@ import SwiftUI
 /// the commands value in app support and performed by the one shell model.
 struct ShellCommands: Commands {
     let model: ShellModel
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Commands {
         // The application menu's own settings item belongs to the settings scene,
@@ -57,7 +56,7 @@ struct ShellCommands: Commands {
             return
         }
         model.performOnceTheWindowShows(item.action)
-        openWindow(id: HazmatApp.windowID)
+        model.showWindow()
     }
 
     private func shortcut(_ shortcut: CommandPresentation.Shortcut) -> KeyboardShortcut {

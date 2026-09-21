@@ -131,8 +131,11 @@ final class ShellIsolationTests: XCTestCase {
 
         XCTAssertTrue(entryPoint.contains("@main"), entryPoint)
         XCTAssertTrue(entryPoint.contains("struct HazmatApp: App"), entryPoint)
-        XCTAssertTrue(entryPoint.contains("Window(\"Hazmat\", id: Self.windowID)"), entryPoint)
+        // The window is the model's, not a scene's: the entry point declares
+        // no window scene and shows the model's window at launch.
+        XCTAssertFalse(entryPoint.contains("Window(\""), entryPoint)
         XCTAssertFalse(entryPoint.contains("WindowGroup"), entryPoint)
+        XCTAssertTrue(entryPoint.contains("model.showWindow()"), entryPoint)
         XCTAssertTrue(entryPoint.contains("MenuBarExtra"), entryPoint)
     }
 
@@ -161,7 +164,10 @@ final class ShellIsolationTests: XCTestCase {
         XCTAssertEqual(constructions, 1, "one instance, shared: \(sources.map(\.0))")
 
         let entryPoint = sources.first { $0.0 == "HazmatApp.swift" }?.1 ?? ""
-        XCTAssertTrue(entryPoint.contains("ShellView(model: model)"), entryPoint)
+        // The shell window is the model's, so the model hands itself to the
+        // shell view; the entry point hands the model to everything else.
+        let shell = sources.first { $0.0 == "ShellModel.swift" }?.1 ?? ""
+        XCTAssertTrue(shell.contains("ShellView(model: self)"), shell)
         XCTAssertTrue(entryPoint.contains("StatusMenu(model: model)"), entryPoint)
         XCTAssertTrue(entryPoint.contains("SettingsView(model: model)"), entryPoint)
         XCTAssertTrue(entryPoint.contains("ShellCommands(model: model)"), entryPoint)
@@ -185,9 +191,10 @@ final class ShellIsolationTests: XCTestCase {
             entryPoint.contains(".commands { ShellCommands(model: model) }"),
             "the menu bar is declared in the entry point: \(entryPoint)"
         )
+        let window = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellWindow.swift" }?.1 ?? ""
         XCTAssertTrue(
-            entryPoint.contains(".defaultSize(width: 1080, height: 700)"),
-            "the documented default size is declared in the entry point: \(entryPoint)"
+            window.contains("defaultSize = NSSize(width: 1080, height: 700)"),
+            "the documented default size is declared with the window: \(window)"
         )
 
         for needle in ["if ", "guard ", "switch ", "ForEach", "filter", ".contains(", "== "] {

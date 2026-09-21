@@ -2,29 +2,29 @@ import SwiftUI
 
 @main
 struct HazmatApp: App {
-    /// The window's identity, so a command with the window closed can bring it
-    /// back before asking it for a name or a confirmation.
-    static let windowID = "main"
+    @NSApplicationDelegateAdaptor(Launch.self) private var launch
+    @State private var model: ShellModel
 
-    @State private var model = ShellModel(updates: UpdateChecker())
+    init() {
+        let model = ShellModel(updates: UpdateChecker())
+        _model = State(initialValue: model)
+        launch.showWindow = { model.showWindow() }
+    }
 
+    /// The shell window is the model's, not a scene's: a scene keeps its
+    /// window and the view tree under it after a close, and the model lets
+    /// both go. The settings scene carries the menu bar's commands.
     var body: some Scene {
-        Window("Hazmat", id: Self.windowID) {
-            ShellView(model: model)
-        }
-        .defaultSize(width: 1080, height: 700)
-        .windowResizability(.contentMinSize)
-        .commands { ShellCommands(model: model) }
-
-        Settings {
-            SettingsView(model: model)
-        }
-
         MenuBarExtra {
             StatusMenu(model: model)
         } label: {
             StatusMark(model: model)
         }
         .menuBarExtraStyle(.menu)
+        .commands { ShellCommands(model: model) }
+
+        Settings {
+            SettingsView(model: model)
+        }
     }
 }

@@ -13,8 +13,9 @@ None of the bytes are needed with the window closed. What the menu and the sched
 - A profile's rendering is held across reads as a digest and an entry count. The rendered bytes are derived only for the window's selected profile and let go with the parses when the window closes.
 - One read serves the window and the menu: the editor's read derives the activation from the same live bytes and renders, so a refresh reads `/etc/hosts` once.
 - The window is an `NSWindow` the shell model shows and lets go of: closing it releases the window, the hosting view and the whole view tree, rather than giving the panes a new identity inside a scene that keeps the window.
+- The bundle launches the application in malloc's space-efficient mode, so what a close frees goes back to the system rather than into malloc's large-block cache, which was measured not to drain by itself or on request.
 
-Nothing in what the window shows, offers or writes changes.
+Nothing in what the window shows, offers or writes changes. Measured on the same store after the change: window open 82 MB, window closed 38 MB.
 
 ## Capabilities
 
@@ -26,11 +27,13 @@ None.
 
 - `app-window`: closing the window releases the window; the application keeps digests and counts, not bytes, while it lives in the menu bar.
 - `profile-editor`: derived work is reused between reads while the digest of the bytes read is unchanged.
+- `app-bundle`: the bundle launches the application in malloc's space-efficient mode, and the verifier checks that it does.
 
 ## Impact
 
 - `Sources/HazmatCore`: `ByteDigest` and `FileBytes` (new); `Activation`, `HostsFileApplier`, `StoreReading`, `StoreReadingCache`, `LiveFile`.
 - `Sources/HazmatAppSupport`: `StoreCache`, `EditorModel`, `EditorPresentation`, `ActiveProfileReading`, `MenuPresentation`, `StoreSession`, `ProfileCatalogue`.
-- `Sources/HazmatApp`: `ShellWindow` (new), `HazmatApp`, `ShellModel`, `ShellView`, `ShellCommands`, `StatusMenu`, `WindowViews`.
-- Tests across `HazmatCoreTests`, `HazmatAppSupportTests` and `HazmatAppTests`.
+- `Sources/HazmatApp`: `ShellWindow` and `Launch` (new), `HazmatApp`, `ShellModel`, `ShellView`, `ShellCommands`, `StatusMenu`, `WindowViews`.
+- `Scripts/assemble-bundle.sh` and `Scripts/verify-bundle.sh`: the launch environment.
+- Tests across `HazmatCoreTests`, `HazmatAppSupportTests`, `HazmatAppTests` and `HazmatPackagingTests`.
 - No new dependencies (`CryptoKit` is the system's). No change to the store, the block, the protocol or the helper. The frame SwiftUI saved for the window is under its own key, so the first launch after this opens at the default size once.

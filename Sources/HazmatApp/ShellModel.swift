@@ -130,18 +130,12 @@ final class ShellModel {
     /// How the resolved block is read. The window's, not the pane's, so the
     /// pane shows what was last chosen and the window can put it back.
     var resolvedViewMode: ResolvedViewMode = .text
-    /// The identity of the window's panes. A SwiftUI window that closes keeps
-    /// its view tree — the text views and the table of the resolved block with
-    /// it — so a close changes the identity and the scene builds the panes
-    /// afresh when the window shows again. What they showed is still here: the
-    /// selection, the draft and the last read.
-    private(set) var paneGeneration = 0
     /// Whether the shell window is showing. A read for a window that is not
-    /// carries no composition and no fragment text, and the parses a read
-    /// needed are let go once it lands: an application that lives in the menu
-    /// bar holds nothing of a large fragment but its bytes and its block. Off
-    /// until the scene reports a window that is on screen, so a launch into
-    /// the menu bar never parses a fragment for a window nobody opened.
+    /// carries no composition, no block bytes and no fragment text, and the
+    /// parses a read needed are let go once it lands: an application that
+    /// lives in the menu bar holds nothing of a large fragment but a digest
+    /// and a count. Off until the window is shown, so a launch into the menu
+    /// bar never parses a fragment for a window nobody opened.
     private var windowShowing: Bool
 
     /// The edited fragment text, so the menu's Save acts on the same draft the
@@ -206,22 +200,18 @@ final class ShellModel {
     /// Sees a window become key, which is when an action asked for while the
     /// window was closed has somewhere to present itself.
     @ObservationIgnored private nonisolated(unsafe) var keyWindowObserver: (any NSObjectProtocol)?
-    /// Sees a window update, which a window on screen does as soon as it is:
-    /// the sign that the shell window is showing and wants its read in full. A
-    /// window opened from the menu bar is on screen without the application
-    /// active, so becoming key is not the sign, and its occlusion state is not
-    /// reported on the first showing.
-    @ObservationIgnored private nonisolated(unsafe) var updateObserver: (any NSObjectProtocol)?
     /// An action asked for while the window was closed, kept until a window is
     /// there to present what it asks for.
     private var actionAwaitingTheWindow: WindowAction?
     /// The monitor that answers the window's own keystrokes, held for the same
     /// reason, so it can be removed when the model goes away.
     @ObservationIgnored private nonisolated(unsafe) var shortcutMonitor: Any?
-    /// The window the shell is shown in. A keystroke the window answers without a
-    /// menu bar item acts on the sidebar's selection, which only that window
-    /// shows.
-    @ObservationIgnored private weak var shellWindow: NSWindow?
+    /// The window the shell is shown in, owned here: shown when asked for and
+    /// let go of when it closes. A keystroke the window answers without a menu
+    /// bar item acts on the sidebar's selection, which only that window shows.
+    @ObservationIgnored private let windowHost = ShellWindow()
+    var shellWindow: NSWindow? { windowHost.window }
+    var isWindowShowing: Bool { windowHost.isShowing }
     /// The read the window and the menu ask for. Injectable so a test can decide
     /// when a read lands.
     @ObservationIgnored private let readStore: StoreRead
@@ -296,13 +286,13 @@ final class ShellModel {
         // than holding the first frame back for them.
         checkPresence(forced: true)
         startRemoteSchedule()
+        windowHost.onClose = { [weak self] in self?.windowClosed() }
         dockObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { [weak self] note in
             let closing = (note.object as? NSWindow).map(ObjectIdentifier.init)
             MainActor.assumeIsolated {
                 self?.matchDockPresenceToTheWindows(ignoring: closing)
-                self?.retireThePanes(ifClosing: closing)
             }
         }
         keyWindowObserver = NotificationCenter.default.addObserver(
@@ -313,20 +303,6 @@ final class ShellModel {
             MainActor.assumeIsolated {
                 guard NSApp.keyWindow?.level == .normal else { return }
                 self?.performTheActionAwaitingTheWindow()
-            }
-        }
-        updateObserver = NotificationCenter.default.addObserver(
-            forName: NSWindow.didUpdateNotification, object: nil, queue: .main
-        ) { [weak self] note in
-            let updated = (note.object as? NSWindow).map(ObjectIdentifier.init)
-            MainActor.assumeIsolated {
-                // Every update of every window comes through here, so the
-                // common case — the window is showing already — returns
-                // first. Whether it is on screen is asked of the shell window
-                // itself, which keeps the notification's object on its own side.
-                guard let self, !self.windowShowing, let updated, let shellWindow = self.shellWindow,
-                      ObjectIdentifier(shellWindow) == updated, shellWindow.isVisible else { return }
-                self.showThePanes(ifShowing: updated)
             }
         }
         // A local monitor sees a keystroke before it is dispatched, which is what
@@ -343,38 +319,34 @@ final class ShellModel {
         }
     }
 
-    // MARK: - The window's own keystrokes
+    // MARK: - The window
 
-    /// The window the shell is shown in, told by the scene that renders it. A
-    /// window that is on screen when it is told of is showing; one that is not
-    /// yet is showing when it becomes key.
-    func windowChanged(_ window: NSWindow?) {
-        shellWindow = window
-        if let window, window.isVisible {
-            showThePanes(ifShowing: ObjectIdentifier(window))
-        }
-    }
-
-    /// Lets the panes go when the shell window closes: the resolved block goes
-    /// back to text, and the panes take a new identity so what the closed window
-    /// built is released rather than kept for it.
-    private func retireThePanes(ifClosing closing: ObjectIdentifier?) {
-        guard let shellWindow, let closing, ObjectIdentifier(shellWindow) == closing else { return }
-        resolvedViewMode = .text
-        paneGeneration += 1
-        windowShowing = false
-        // The read that follows carries no detail, and adopting it lets the
-        // parses go: what the panes showed is dropped for what the menu needs.
-        refreshEditor()
-    }
-
-    /// Reads in full again once the shell window is on screen: the composition
-    /// and the text the closed window let go of are what its panes show.
-    private func showThePanes(ifShowing window: ObjectIdentifier) {
-        guard !windowShowing, let shellWindow, ObjectIdentifier(shellWindow) == window else { return }
+    /// Shows the window, making it if there is none, and brings the
+    /// application forward with it. The first showing after a close reads in
+    /// full again: the composition, the block and the text the closed window
+    /// let go of are what its panes show.
+    func showWindow() {
+        windowHost.show { ShellView(model: self) }
+        windowOpened()
+        guard !windowShowing else { return }
         windowShowing = true
         refreshEditor()
     }
+
+    /// The window has closed and been let go of: the resolved block goes back
+    /// to text, and the read that follows carries no detail, so adopting it
+    /// lets the parses, the composition and the block's bytes go — what the
+    /// panes showed is dropped for what the menu needs. What malloc would
+    /// keep of the freed window goes back to the system because the bundle
+    /// launches the application in malloc's space-efficient mode; asking
+    /// malloc for relief from here was measured and returned nothing.
+    private func windowClosed() {
+        resolvedViewMode = .text
+        windowShowing = false
+        refreshEditor()
+    }
+
+    // MARK: - The window's own keystrokes
 
     /// Performs an action that presents something, once there is a window to
     /// present it in. A window that is already showing gets it now; otherwise
@@ -1410,7 +1382,7 @@ final class ShellModel {
 
     /// A window is on screen: the application is a regular citizen again, in
     /// the Dock and the application switcher, and comes forward.
-    func windowOpened() {
+    private func windowOpened() {
         NSApp.setActivationPolicy(.regular)
         NSApp.activate()
     }
@@ -1435,9 +1407,6 @@ final class ShellModel {
         }
         if let keyWindowObserver {
             NotificationCenter.default.removeObserver(keyWindowObserver)
-        }
-        if let updateObserver {
-            NotificationCenter.default.removeObserver(updateObserver)
         }
         if let remoteTimer {
             remoteTimer.invalidate()

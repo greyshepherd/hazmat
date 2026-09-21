@@ -327,6 +327,11 @@ cat > "$APP/Contents/Info.plist" <<PLIST
     <string>NSApplication</string>
     <key>NSHighResolutionCapable</key>
     <true/>
+    <key>LSEnvironment</key>
+    <dict>
+        <key>MallocSpaceEfficient</key>
+        <string>1</string>
+    </dict>
 $([ "$DECLARE_FEED" = "true" ] && cat <<FEED
     <key>SUFeedURL</key>
     <string>$FEED_URL</string>
