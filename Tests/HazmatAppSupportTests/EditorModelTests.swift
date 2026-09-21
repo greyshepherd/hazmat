@@ -9,6 +9,7 @@ private let other = ProfileID("other")
 final class EditorModelTests: XCTestCase {
     private let base = FragmentID("base")
     private let project = FragmentID("project")
+    private let ads = FragmentID("ads")
 
     private func stackedFixture() throws -> StoreFixture {
         try StoreFixture(
@@ -494,5 +495,191 @@ final class EditorModelTests: XCTestCase {
 
         // The bytes just read are the ones the next read is answered from.
         XCTAssertEqual(model.read(selection: .profile(work)), after)
+    }
+
+    // MARK: - 3.8 A refresh is an edit
+
+    /// The store of `stackedFixture` with an `ads` fragment that only `other`
+    /// stacks, so a refresh of it reaches no live profile.
+    private func remoteFixture() throws -> (StoreFixture, RemoteSource) {
+        let fixture = try StoreFixture(
+            store: [
+                ("127.0.0.1\tlocalhost alpha.example\n", "fragments/base.hosts"),
+                ("10.0.0.9\talpha.example\n", "fragments/project.hosts"),
+                ("0.0.0.0\tads.example.com\n", "fragments/ads.hosts"),
+                ("base\nproject\n", "profiles/work.profile"),
+                ("base\nads\n", "profiles/other.profile")
+            ],
+            live: "127.0.0.1\tlocalhost\n"
+        )
+        let source = RemoteSource(
+            url: URL(string: "https://example.com/base.txt")!,
+            interval: 86_400,
+            lastAttempt: Date(timeIntervalSince1970: 1_759_000_000),
+            lastSuccess: Date(timeIntervalSince1970: 1_759_000_000),
+            etag: "\"v1\""
+        )
+        return (fixture, source)
+    }
+
+    func testARefreshOfAFragmentTheAppliedProfileStacksRewritesTheLiveBlock() async throws {
+        let (fixture, source) = try remoteFixture()
+        defer { fixture.remove() }
+        let writer = LocalWriter(target: fixture.live.url)
+        let model = fixture.model(writer: writer)
+        try fixture.applyToLive(work)
+        let before = model.read(selection: .profile(work))
+        XCTAssertEqual(before.appliedProfiles, [work])
+
+        let fetcher = StubFetcher(
+            .succeeded(body: bytes("127.0.0.1\trefreshed.example\n"), etag: "\"v2\"", finalURL: source.url)
+        )
+        let outcome = await model.refresh(
+            fragment: base, source: source, previous: before, fetcher: fetcher,
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+
+        XCTAssertEqual(outcome.store, .success(.wrote))
+        XCTAssertEqual(outcome.apply, .applied(.replacedBlock(overwroteDrift: true)))
+        XCTAssertEqual(writer.writes, 1)
+        XCTAssertEqual(try fixture.text("fragments/base.hosts"), "127.0.0.1\trefreshed.example\n")
+        XCTAssertEqual(outcome.refresh?.outcome, .wrote)
+        XCTAssertTrue(outcome.description.contains("new text"), outcome.description)
+
+        let live = try XCTUnwrap(ManagedBlock.locate(in: fixture.live.data))
+        XCTAssertEqual(Data(fixture.live.data[live.range]), try fixture.rendered(work))
+        XCTAssertEqual(text(try BlockSplice.strip(from: fixture.live.data)), "127.0.0.1\tlocalhost\n")
+    }
+
+    func testARefreshWhoseLiveBlockMovedReportsDriftAndLeavesTheFileAlone() async throws {
+        let (fixture, source) = try remoteFixture()
+        defer { fixture.remove() }
+        let writer = LocalWriter(target: fixture.live.url)
+        let model = fixture.model(writer: writer)
+        try fixture.applyToLive(work)
+        let before = model.read(selection: .profile(work))
+        XCTAssertEqual(before.appliedProfiles, [work])
+
+        // Another tool changes a line inside the block after the read.
+        let changed = bytes(text(fixture.live.data).replacingOccurrences(of: "alpha.example", with: "moved.example"))
+        try fixture.live.write(changed)
+
+        let fetcher = StubFetcher(.succeeded(body: bytes("127.0.0.1\trefreshed.example\n"), finalURL: source.url))
+        let outcome = await model.refresh(
+            fragment: base, source: source, previous: before, fetcher: fetcher,
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+
+        XCTAssertEqual(outcome.apply, .refused(.driftNotOverwritten))
+        XCTAssertEqual(writer.writes, 0)
+        XCTAssertEqual(fixture.live.data, changed, "the live file is left as it is")
+        XCTAssertEqual(
+            try fixture.text("fragments/base.hosts"),
+            "127.0.0.1\trefreshed.example\n",
+            "the refreshed text is in the store regardless"
+        )
+        XCTAssertTrue(outcome.description.contains("drift"), outcome.description)
+    }
+
+    func testARefreshOfAFragmentNoAppliedProfileStacksLeavesTheLiveFileAlone() async throws {
+        let (fixture, source) = try remoteFixture()
+        defer { fixture.remove() }
+        let writer = LocalWriter(target: fixture.live.url)
+        let model = fixture.model(writer: writer)
+        try fixture.applyToLive(work)
+        let before = model.read(selection: .profile(work))
+        let liveBefore = try fixture.live.state()
+        XCTAssertEqual(before.appliedProfiles, [work])
+        XCTAssertEqual(before.stacks(ads), [other], "only the profile that is not live stacks it")
+
+        let fetcher = StubFetcher(.succeeded(body: bytes("0.0.0.0\tnew-ads.example.com\n"), finalURL: source.url))
+        let outcome = await model.refresh(
+            fragment: ads, source: source, previous: before, fetcher: fetcher,
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+
+        XCTAssertEqual(outcome.store, .success(.wrote))
+        XCTAssertNil(outcome.apply, "no live profile stacks the refreshed fragment")
+        XCTAssertEqual(writer.writes, 0)
+        XCTAssertEqual(try fixture.live.state(), liveBefore, "the bytes and the modification time are untouched")
+        XCTAssertEqual(try fixture.text("fragments/ads.hosts"), "0.0.0.0\tnew-ads.example.com\n")
+    }
+
+    func testARefreshWhoseApplyIsRefusedKeepsTheRefreshedTextAndReportsTheReason() async throws {
+        let (fixture, source) = try remoteFixture()
+        defer { fixture.remove() }
+        let helper = UnregisteredHelper()
+        let model = fixture.model(writer: helper)
+        try fixture.applyToLive(work)
+        let before = model.read(selection: .profile(work))
+        let liveBefore = try fixture.live.state()
+
+        let fetcher = StubFetcher(.succeeded(body: bytes("127.0.0.1\trefreshed.example\n"), finalURL: source.url))
+        let outcome = await model.refresh(
+            fragment: base, source: source, previous: before, fetcher: fetcher,
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+
+        XCTAssertEqual(outcome.store, .success(.wrote))
+        XCTAssertEqual(outcome.apply, .refused(.privileged("the helper is not registered")))
+        XCTAssertEqual(helper.requests, 1)
+        XCTAssertEqual(try fixture.live.state(), liveBefore, "the live file is unchanged")
+        XCTAssertEqual(try fixture.text("fragments/base.hosts"), "127.0.0.1\trefreshed.example\n")
+        XCTAssertTrue(outcome.needsAttention)
+        XCTAssertTrue(outcome.description.contains("not registered"), outcome.description)
+    }
+
+    func testARefreshWithNoChangeWritesNothingAndReportsIt() async throws {
+        let (fixture, source) = try remoteFixture()
+        defer { fixture.remove() }
+        let writer = LocalWriter(target: fixture.live.url)
+        let model = fixture.model(writer: writer)
+        try fixture.applyToLive(work)
+        let before = model.read(selection: .profile(work))
+        let liveBefore = try fixture.live.state()
+        let fragmentBefore = try FileState(of: fixture.store.root.appendingPathComponent("fragments/base.hosts"))
+
+        let fetcher = StubFetcher(.notModified(etag: "\"v1\"", finalURL: source.url))
+        let outcome = await model.refresh(
+            fragment: base, source: source, previous: before, fetcher: fetcher,
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+
+        XCTAssertEqual(outcome.refresh?.outcome, .unchanged)
+        XCTAssertEqual(outcome.store, .success(.unchanged))
+        XCTAssertNil(outcome.apply)
+        XCTAssertEqual(writer.writes, 0)
+        XCTAssertEqual(try fixture.live.state(), liveBefore)
+        XCTAssertEqual(
+            try FileState(of: fixture.store.root.appendingPathComponent("fragments/base.hosts")),
+            fragmentBefore
+        )
+    }
+
+    func testARefusedRefreshLeavesTheStoreAndTheLiveFileAlone() async throws {
+        let (fixture, source) = try remoteFixture()
+        defer { fixture.remove() }
+        let writer = LocalWriter(target: fixture.live.url)
+        let model = fixture.model(writer: writer)
+        try fixture.applyToLive(work)
+        let before = model.read(selection: .profile(work))
+        let liveBefore = try fixture.live.state()
+        let fragmentBefore = try FileState(of: fixture.store.root.appendingPathComponent("fragments/base.hosts"))
+
+        let fetcher = StubFetcher(.succeeded(body: bytes("# hazmat:remove ads.example.com\n"), finalURL: source.url))
+        let outcome = await model.refresh(
+            fragment: base, source: source, previous: before, fetcher: fetcher,
+            at: Date(timeIntervalSince1970: 1_760_000_000)
+        )
+
+        XCTAssertEqual(outcome.refresh?.wasRefused, true)
+        XCTAssertEqual(writer.writes, 0)
+        XCTAssertEqual(try fixture.live.state(), liveBefore)
+        XCTAssertEqual(
+            try FileState(of: fixture.store.root.appendingPathComponent("fragments/base.hosts")),
+            fragmentBefore
+        )
+        XCTAssertTrue(outcome.needsAttention)
+        XCTAssertTrue(outcome.description.contains("hazmat:"), outcome.description)
     }
 }

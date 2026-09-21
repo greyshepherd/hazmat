@@ -32,21 +32,36 @@ public struct StoreSession: Sendable {
     /// survives re-pointing at the same store and is left behind when the store
     /// moves, so another store's bytes are never held.
     public let cache: StoreCache
+    /// The moment a read is answered from, so a row's out-of-date state is
+    /// decided by the same clock the schedule uses.
+    public let now: @Sendable () -> Date
 
-    public init(root: URL, fileURL: URL, writer: PrivilegedWriter, cache: StoreCache = StoreCache()) {
+    public init(
+        root: URL,
+        fileURL: URL,
+        writer: PrivilegedWriter,
+        cache: StoreCache = StoreCache(),
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         self.root = root
         self.fileURL = fileURL
         self.writer = writer
         self.cache = cache
+        self.now = now
     }
 
     public var layout: StoreLayout { StoreLayout(root: root) }
 
     public var catalogue: ProfileCatalogue { ProfileCatalogue(root: root, cache: cache) }
 
-    public var editor: EditorModel { EditorModel(storeRoot: root, fileURL: fileURL, writer: writer, cache: cache) }
+    public var editor: EditorModel {
+        EditorModel(storeRoot: root, fileURL: fileURL, writer: writer, cache: cache, now: now)
+    }
 
     public var applier: HostsFileApplier { HostsFileApplier(fileURL: fileURL, writer: writer) }
+
+    /// The store's remote sources, read from `remote/` when it is asked.
+    public var remoteSources: RemoteSourceCatalogue { RemoteSourceCatalogue(layout: layout) }
 
     public var liveFile: LiveHostsFile { LiveHostsFile(url: fileURL) }
 
@@ -58,7 +73,8 @@ public struct StoreSession: Sendable {
             root: root,
             fileURL: fileURL,
             writer: writer,
-            cache: root == self.root ? cache : StoreCache()
+            cache: root == self.root ? cache : StoreCache(),
+            now: now
         )
     }
 }

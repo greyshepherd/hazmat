@@ -80,7 +80,13 @@ final class HelperStateTests: XCTestCase {
         XCTAssertTrue(sidebar.contains("helper.remedy"), sidebar)
 
         let model = sourceFiles(in: "Sources/HazmatApp").first { $0.0 == "ShellModel.swift" }?.1 ?? ""
-        XCTAssertTrue(model.contains("registration.state"), model)
+        // The state comes from what the system reports, read through one seam
+        // whose default is that call — so a test can approve a helper without
+        // installing one, and nothing else can invent a state. The call itself
+        // is not named here: the suite is forbidden to reach for it.
+        XCTAssertTrue(model.contains("registrationState()"), model)
+        XCTAssertTrue(model.contains("HelperRegistrationState = {"), model)
+        XCTAssertTrue(model.contains("let registered = registrationState()"), model)
         XCTAssertTrue(model.contains("HelperSheetPresentation(current: helper)"), model)
         // The registration alone is not the answer: what the window shows is the
         // registration refined by a check for the helper.

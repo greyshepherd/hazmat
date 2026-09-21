@@ -127,7 +127,9 @@ struct NoStorePane: View {
 }
 
 /// A selected fragment: its labelled name, its text in a monospaced editor, and
-/// whether the draft is saved.
+/// whether the draft is saved. A fragment fetched from a URL is shown read-only
+/// with the URL it comes from and the action that refreshes it, because the next
+/// refresh replaces its text.
 struct FragmentEditor: View {
     @Bindable var model: ShellModel
     let fragment: FragmentID
@@ -135,6 +137,7 @@ struct FragmentEditor: View {
 
     var body: some View {
         let editor: EditorPresentation = model.editor
+        let origin = editor.origin(of: fragment)
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 10) {
                 Text("Fragment")
@@ -142,7 +145,15 @@ struct FragmentEditor: View {
                     .bold()
                     .foregroundStyle(.primary)
                 Spacer()
-                if model.fragmentIsDirty {
+                if let origin {
+                    // The chip carries the state, not the kind: where the text
+                    // comes from is the row below it and the sidebar's mark.
+                    StatusLabel(
+                        symbolName: origin.isOutOfDate ? "arrow.triangle.2.circlepath" : "checkmark.circle",
+                        word: origin.isOutOfDate ? "Out of date" : "Fetched",
+                        tone: origin.isOutOfDate ? .warning : .success
+                    )
+                } else if model.fragmentIsDirty {
                     StatusLabel(symbolName: "pencil", word: "Unsaved changes", tone: .warning)
                 } else {
                     StatusLabel(symbolName: "checkmark.circle", word: "Saved", tone: .success)
@@ -161,29 +172,52 @@ struct FragmentEditor: View {
             .onAppear { nameDraft = fragment.rawValue }
             .onChange(of: fragment) { _, name in nameDraft = name.rawValue }
 
+            if let origin {
+                LabeledContent("Fetched from") {
+                    Text(origin.url?.absoluteString ?? "the source record cannot be read")
+                        .foregroundStyle(.secondary)
+                        .textSelection(.enabled)
+                }
+                LabeledContent("Refresh") {
+                    Text(origin.state)
+                        .foregroundStyle(origin.isOutOfDate ? .orange : .secondary)
+                }
+            }
+
             LabeledContent("Entries") {
                 let count = editor.entryCount(of: fragment) ?? 0
                 Text("\(count) \(count == 1 ? "entry" : "entries")")
                     .foregroundStyle(.secondary)
             }
 
-            PlainTextView(text: model.fragmentDraft, isEditable: true) { text in
+            PlainTextView(text: model.fragmentDraft, isEditable: origin == nil) { text in
                 model.fragmentDraft = text
             }
             .frame(minHeight: 220)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 6))
+            .background(
+                Color(nsColor: origin == nil ? .controlBackgroundColor : .underPageBackgroundColor),
+                in: RoundedRectangle(cornerRadius: 6)
+            )
             .overlay {
                 RoundedRectangle(cornerRadius: 6)
                     .strokeBorder(Color(nsColor: .separatorColor))
             }
 
             HStack(spacing: 8) {
-                Button(WindowAction.save.title) { model.saveFragment(text: model.fragmentDraft) }
-                    .disabled(!model.fragmentIsDirty)
-                Spacer()
-                Text("Saved edits to the applied profile re-apply its block.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if origin != nil {
+                    Button("Refresh Now") { model.refreshSource(fragment) }
+                    Spacer()
+                    Text("Fetched text is read-only here; the next refresh replaces it. Edit the file itself to keep changes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                } else {
+                    Button(WindowAction.save.title) { model.saveFragment(text: model.fragmentDraft) }
+                        .disabled(!model.fragmentIsDirty)
+                    Spacer()
+                    Text("Saved edits to the applied profile re-apply its block.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
             }
         }
         .padding(16)

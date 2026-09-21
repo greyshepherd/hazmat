@@ -9,6 +9,8 @@ public enum WindowAction: Equatable, Sendable {
     case chooseLocation
     case newProfile
     case newFragment
+    /// Asks for a name, a URL, and an interval, and records a source from them.
+    case newSource
     case apply
     case revert
     case overwriteDrift
@@ -34,7 +36,7 @@ public enum WindowAction: Equatable, Sendable {
     /// confirmation, a sheet, or the search field.
     public var presentsInTheWindow: Bool {
         switch self {
-        case .createStore, .chooseLocation, .newProfile, .newFragment,
+        case .createStore, .chooseLocation, .newProfile, .newFragment, .newSource,
              .apply, .revert, .overwriteDrift, .removeBlock, .rename, .duplicate, .delete,
              .save, .installHelper, .search, .showHelp:
             return true
@@ -50,6 +52,7 @@ public enum WindowAction: Equatable, Sendable {
         case .chooseLocation: return "Choose Location…"
         case .newProfile: return "New Profile"
         case .newFragment: return "New Fragment"
+        case .newSource: return "New Source…"
         case .apply: return "Apply"
         case .revert: return "Revert"
         case .overwriteDrift: return "Overwrite the Drifted Block…"

@@ -75,12 +75,65 @@ public struct ProfileRow: Equatable, Sendable, Identifiable {
     public var id: ProfileID { profile }
 }
 
-/// A fragment as a sidebar row: the entries it holds.
+/// A fragment as a sidebar row: the entries it holds, and where it comes from
+/// when it is fetched from a URL.
 public struct FragmentRow: Equatable, Sendable, Identifiable {
+    /// Where a fragment comes from, and what its last refresh came to. A source
+    /// whose sidecar cannot be read has a row with a `failure` and no `url`: it
+    /// is reported, not hidden.
+    public struct Origin: Equatable, Sendable {
+        /// The URL the fragment is fetched from, or `nil` when the sidecar cannot
+        /// be read.
+        public let url: URL?
+        public let interval: TimeInterval?
+        public let lastAttempt: Date?
+        public let lastSuccess: Date?
+        /// Why the last refresh failed, or why the sidecar cannot be read.
+        public let failure: String?
+        /// Whether the text is missing or older than the interval says it should
+        /// be.
+        public let isOutOfDate: Bool
+
+        /// Whether the origin itself cannot be read.
+        public var isBroken: Bool { url == nil }
+
+        /// The domain the text comes from, for the row's own line: a sidebar
+        /// column is too narrow for the whole address, and the domain is what
+        /// tells two sources apart. The whole URL is named where there is room
+        /// for it — the row's tooltip and the detail pane.
+        public var host: String? {
+            guard let url else { return nil }
+            return url.host() ?? url.absoluteString
+        }
+
+        /// The source's last refresh as the row says it: why it could not, or
+        /// when it last did, and whether it is out of date now.
+        public var state: String {
+            var parts: [String] = []
+            if isBroken {
+                parts.append(failure ?? "the source record cannot be read")
+            } else if let failure {
+                parts.append(failure)
+            } else if let lastSuccess {
+                parts.append("Refreshed \(lastSuccess.formatted(date: .abbreviated, time: .shortened))")
+            } else {
+                parts.append("Never refreshed")
+            }
+            if isOutOfDate { parts.append("Out of date") }
+            return parts.joined(separator: " · ")
+        }
+    }
+
     public let fragment: FragmentID
     public let entryCount: Int
+    /// The origin, when the fragment is a source. `nil` for an ordinary
+    /// fragment.
+    public let origin: Origin?
 
     public var id: FragmentID { fragment }
+
+    /// Whether the fragment is fetched from a URL.
+    public var isRemote: Bool { origin != nil }
 }
 
 /// A layer of the selected profile: its position in the stack and the entries
@@ -113,6 +166,8 @@ public struct EditorPresentation: Equatable, Sendable {
         case moveLayer(ProfileID, from: Int, to: Int)
         case applyProfile(ProfileID)
         case overwriteDrift(ProfileID, liveBlock: Data)
+        /// Fetches the source now, whatever its interval says.
+        case refreshSource(FragmentID)
     }
 
     /// What the content pane shows. The selected item wins: a store that holds
@@ -175,12 +230,19 @@ public struct EditorPresentation: Equatable, Sendable {
     public let usingProfiles: [ProfileID]
     /// The profiles whose rendering is the live block.
     public let appliedProfiles: [ProfileID]
+    /// The block the live file holds, when it holds a readable one. The selected
+    /// profile's rendering is `renderedBlock`; this is the file's own block,
+    /// which every profile in `appliedProfiles` renders.
+    public let liveBlock: Data?
     /// What the live file holds for the selected profile's block.
     public let live: LiveBlockState
     /// Why the store could not be read, when it could not.
     public let storeProblem: String?
     /// The actions the window can offer in this state.
     public let actions: [Action]
+    /// The profiles whose stack references each fragment, so a question about a
+    /// fragment other than the selected one is answered from the same read.
+    let fragmentUsers: [FragmentID: [ProfileID]]
 
     /// The block the selected profile renders now.
     public var rendering: Data? { renderedBlock }
@@ -209,8 +271,28 @@ public struct EditorPresentation: Equatable, Sendable {
         fragmentRows.first { $0.fragment == fragment }?.entryCount
     }
 
+    /// The fragment as a sidebar row, whether or not the store holds its text.
+    public func fragmentRow(_ fragment: FragmentID) -> FragmentRow? {
+        fragmentRows.first { $0.fragment == fragment }
+    }
+
+    /// Where the fragment comes from, when it is a source.
+    public func origin(of fragment: FragmentID) -> FragmentRow.Origin? {
+        fragmentRow(fragment)?.origin
+    }
+
+    /// Whether the fragment is fetched from a URL.
+    public func isRemote(_ fragment: FragmentID) -> Bool {
+        origin(of: fragment) != nil
+    }
+
     /// Whether the given profile's block is the live one.
     public func isApplied(_ profile: ProfileID) -> Bool {
         appliedProfiles.contains(profile)
+    }
+
+    /// The profiles whose stack references the given fragment, in name order.
+    public func stacks(_ fragment: FragmentID) -> [ProfileID] {
+        fragmentUsers[fragment] ?? []
     }
 }

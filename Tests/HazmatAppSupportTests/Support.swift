@@ -172,8 +172,31 @@ final class StoreFixture {
 
     var shipped: Data { bytes("127.0.0.1\tlocalhost\n") }
 
-    func model(writer: PrivilegedWriter) -> EditorModel {
-        EditorModel(storeRoot: store.root, fileURL: live.url, writer: writer)
+    func model(
+        writer: PrivilegedWriter,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) -> EditorModel {
+        EditorModel(storeRoot: store.root, fileURL: live.url, writer: writer, now: now)
+    }
+
+    /// Records a source beside a fragment, the way the window's add-source step
+    /// does.
+    func writeSource(
+        _ name: FragmentID,
+        url: String,
+        interval: TimeInterval,
+        lastAttempt: Date? = nil,
+        lastSuccess: Date? = nil,
+        lastFailure: String? = nil
+    ) throws {
+        let source = RemoteSource(
+            url: URL(string: url)!,
+            interval: interval,
+            lastAttempt: lastAttempt,
+            lastSuccess: lastSuccess,
+            lastFailure: lastFailure
+        )
+        try store.write(String(decoding: try source.encoded(), as: UTF8.self), to: "remote/\(name.rawValue).remote")
     }
 
     /// The block the store's profile renders.

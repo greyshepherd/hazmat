@@ -168,6 +168,46 @@ final class StoreAuthoringTests: XCTestCase {
         XCTAssertEqual(layout.profiles(), [])
     }
 
+    func testTheSidecarLayoutNamesOneFilePerSourceAndAnEmptyStoreListsNone() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+
+        XCTAssertEqual(store.layout.remoteDirectory.lastPathComponent, "remote")
+        XCTAssertEqual(
+            store.layout.remoteURL(FragmentID("blocklist")).path,
+            store.root.appendingPathComponent("remote/blocklist.remote").path
+        )
+        XCTAssertEqual(store.layout.remoteSources(), [], "a root that does not exist holds no sources")
+    }
+
+    func testTheSourceListingTakesOnlySidecarNamesAndIgnoresEverythingElse() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("{}\n", to: "remote/blocklist.remote")
+        try store.write("{}\n", to: "remote/ads.remote")
+        // A name outside the grammar, and a file of another type, are both
+        // skipped the way the fragment listing skips them.
+        try store.write("{}\n", to: "remote/..hidden.remote")
+        try store.write("not a sidecar\n", to: "remote/notes.txt")
+
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("ads"), FragmentID("blocklist")])
+        XCTAssertEqual(store.layout.remoteSources(), store.layout.remoteSources())
+        // A sidecar whose fragment is not there is still a source: a first fetch
+        // that failed has to stay listed.
+        XCTAssertEqual(store.layout.fragments(), [])
+    }
+
+    func testASidecarIsFoundByItsFragmentName() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("127.0.0.1\tlocalhost\n", to: "fragments/Blocklist.hosts")
+        try store.write("{}\n", to: "remote/Blocklist.remote")
+
+        XCTAssertEqual(store.layout.fragments(), [FragmentID("Blocklist")])
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("Blocklist")])
+        XCTAssertTrue(FileManager.default.fileExists(atPath: store.layout.remoteURL(FragmentID("Blocklist")).path))
+    }
+
     // MARK: - 2.2 Names are validated before anything is written
 
     func testANameOutsideTheGrammarIsRefusedAndLeavesNothingBehind() throws {
@@ -196,6 +236,59 @@ final class StoreAuthoringTests: XCTestCase {
 
         XCTAssertFalse(FileManager.default.fileExists(atPath: store.layout.fragmentsDirectory.path))
         XCTAssertEqual(store.entries(), [])
+    }
+
+    func testTheNameRefusalAgreesWithTheGrammarAndSaysWhatToChange() {
+        let names = [
+            "base", "Local Dev", "a.b_c-d", "1password",
+            "", " leading", "trailing ", "two spaces  ", ".hidden", "-dash", "..", "a..b",
+            "with/slash", "with\\slash", "../escape", "a:b", "a*b", "café", "éclair", "with\nnewline"
+        ]
+
+        for name in names {
+            XCTAssertEqual(
+                NameSyntax.refusal(name) == nil,
+                NameSyntax.isIdentifier(name),
+                "the refusal and the grammar disagree about '\(name)'"
+            )
+        }
+
+        // Each rule gets its own sentence rather than the whole grammar.
+        XCTAssertEqual(NameSyntax.refusal(""), "Enter a name.")
+        XCTAssertEqual(NameSyntax.refusal(" leading"), "A name has to start with a letter or a digit.")
+        XCTAssertEqual(NameSyntax.refusal(".hidden"), "A name has to start with a letter or a digit.")
+        XCTAssertEqual(
+            NameSyntax.refusal("a/b"),
+            "A name cannot hold '/'. Letters, digits, spaces, '.', '_' and '-' are allowed."
+        )
+        XCTAssertEqual(NameSyntax.refusal("a "), "A name cannot end with a space.")
+        XCTAssertEqual(NameSyntax.refusal("a..b"), "A name cannot hold '..'.")
+        XCTAssertEqual(NameSyntax.refusal("Local Dev"), nil)
+
+        // A character that cannot be written in the sentence is not quoted: a
+        // multi-byte character, and a pasted newline.
+        for unquotable in ["café", "éclair", "a\nb"] {
+            let refusal = NameSyntax.refusal(unquotable)
+            XCTAssertEqual(
+                refusal,
+                "A name cannot hold that character. Letters, digits, spaces, '.', '_' and '-' are allowed.",
+                unquotable
+            )
+        }
+    }
+
+    func testAStoreRefusalCarriesTheSameSentenceTheWindowShows() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+
+        XCTAssertThrowsError(try store.writer.save("x\n", asFragment: FragmentID("a/b"))) { error in
+            let description = (error as? StoreWriteError)?.description ?? ""
+            XCTAssertTrue(description.contains("A name cannot hold '/'."), description)
+            XCTAssertFalse(
+                description.contains(NameSyntax.requirement),
+                "the store reports what to change, not the whole grammar: \(description)"
+            )
+        }
     }
 
     func testANameWithAnInteriorSpaceIsWrittenListedAndCarriedThroughARename() throws {
@@ -521,5 +614,146 @@ final class StoreAuthoringTests: XCTestCase {
             .drifted(liveBlock: rendered),
             "the block the deleted profile left behind is drift"
         )
+    }
+
+    // MARK: - 2.6 A source's origin is authored with its fragment
+
+    private func remote(
+        _ url: String,
+        interval: TimeInterval = 86_400,
+        failure: String? = nil
+    ) -> RemoteSource {
+        RemoteSource(
+            url: URL(string: url)!,
+            interval: interval,
+            lastAttempt: Date(timeIntervalSince1970: 1_760_000_000),
+            lastSuccess: failure == nil ? Date(timeIntervalSince1970: 1_759_900_000) : nil,
+            etag: "\"abc\"",
+            lastModified: "Sat, 20 Sep 2026 12:00:00 GMT",
+            lastFailure: failure
+        )
+    }
+
+    private func sidecar(_ store: TemporaryRoot, _ name: String) throws -> RemoteSource {
+        try RemoteSource.decode(Data(contentsOf: store.layout.remoteURL(FragmentID(name))))
+    }
+
+    func testWritingASourceRecordsItsSidecarBeneathItsOwnName() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        let source = remote("https://example.com/hosts.txt?mirror=eu")
+
+        XCTAssertEqual(try store.writer.save(source, as: FragmentID("blocklist")), .wrote)
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("blocklist")])
+        XCTAssertEqual(try sidecar(store, "blocklist"), source)
+        XCTAssertEqual(store.entries(), ["remote/blocklist.remote"], "the origin is recorded even with no fragment yet")
+
+        XCTAssertEqual(try store.writer.save(source, as: FragmentID("blocklist")), .unchanged)
+        XCTAssertEqual(
+            try store.writer.save(remote("https://example.org/hosts.txt"), as: FragmentID("blocklist")),
+            .wrote
+        )
+        XCTAssertEqual(try sidecar(store, "blocklist").url.absoluteString, "https://example.org/hosts.txt")
+    }
+
+    func testRenamingARemoteFragmentMovesBothFilesAndKeepsTheOrigin() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        let source = remote("https://example.com/hosts.txt")
+        try store.writer.save("0.0.0.0\tads.example.com\n", asFragment: FragmentID("blocklist"))
+        try store.writer.save(source, as: FragmentID("blocklist"))
+
+        XCTAssertEqual(try store.writer.rename(fragment: FragmentID("blocklist"), to: FragmentID("trackers")), .wrote)
+
+        XCTAssertEqual(store.layout.fragments(), [FragmentID("trackers")])
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("trackers")])
+        XCTAssertEqual(try store.text("fragments/trackers.hosts"), "0.0.0.0\tads.example.com\n")
+        XCTAssertEqual(try sidecar(store, "trackers"), source)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.layout.remoteURL(FragmentID("blocklist")).path))
+    }
+
+    func testDeletingARemoteFragmentRemovesItsSidecarAndTouchesNoOtherSource() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("0.0.0.0\tads.example.com\n", to: "fragments/blocklist.hosts")
+        try store.write("{}\n", to: "remote/blocklist.remote")
+        try store.write("0.0.0.0\ttracker.example.com\n", to: "fragments/trackers.hosts")
+        try store.write("{}\n", to: "remote/trackers.remote")
+
+        XCTAssertEqual(try store.writer.delete(fragment: FragmentID("blocklist")), .deleted)
+
+        XCTAssertEqual(store.layout.fragments(), [FragmentID("trackers")])
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("trackers")])
+        XCTAssertEqual(store.entries(), ["fragments/trackers.hosts", "remote/trackers.remote"])
+    }
+
+    func testDeletingASidecarOnlyNameReportsAChangeAndAStrangerReportsNothingToDo() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("{}\n", to: "remote/blocklist.remote")
+
+        // A source whose first fetch failed holds a sidecar and no fragment.
+        XCTAssertEqual(store.layout.fragments(), [])
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("blocklist")])
+        XCTAssertEqual(try store.writer.delete(fragment: FragmentID("blocklist")), .deleted)
+        XCTAssertEqual(store.layout.remoteSources(), [])
+        XCTAssertEqual(store.entries(), [])
+
+        XCTAssertEqual(try store.writer.delete(fragment: FragmentID("nothing-here")), .nothingToDo)
+        XCTAssertEqual(try store.writer.deleteRemoteSource(FragmentID("nothing-here")), .nothingToDo)
+    }
+
+    func testDuplicatingARemoteFragmentLeavesTheCopyWithoutAnOrigin() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        let source = remote("https://example.com/hosts.txt")
+        try store.writer.save("0.0.0.0\tads.example.com\n", asFragment: FragmentID("blocklist"))
+        try store.writer.save(source, as: FragmentID("blocklist"))
+
+        XCTAssertEqual(try store.writer.duplicate(fragment: FragmentID("blocklist"), as: FragmentID("snapshot")), .wrote)
+
+        XCTAssertEqual(try store.text("fragments/snapshot.hosts"), "0.0.0.0\tads.example.com\n")
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("blocklist")], "the copy is a separate text, not a second source")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: store.layout.remoteURL(FragmentID("snapshot")).path))
+        XCTAssertEqual(try sidecar(store, "blocklist"), source)
+    }
+
+    func testRenamingOntoASidecarOnlyNameIsRefusedAndTouchesNeitherSource() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.write("0.0.0.0\tads.example.com\n", to: "fragments/blocklist.hosts")
+        try store.write("{}\n", to: "remote/blocklist.remote")
+        // A source whose first fetch failed: a sidecar and no fragment.
+        try store.write("{}\n", to: "remote/pending.remote")
+        let before = try store.text("remote/pending.remote")
+
+        XCTAssertThrowsError(try store.writer.rename(fragment: FragmentID("blocklist"), to: FragmentID("pending"))) { error in
+            XCTAssertEqual(error as? StoreWriteError, .nameTaken("pending"))
+        }
+
+        XCTAssertEqual(try store.text("remote/pending.remote"), before)
+        XCTAssertEqual(store.layout.remoteSources(), [FragmentID("blocklist"), FragmentID("pending")])
+        XCTAssertEqual(store.layout.fragments(), [FragmentID("blocklist")])
+    }
+
+    func testRenamingAPlainFragmentOntoAnOrdinaryNameCarriesNoSidecar() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+        try store.writer.save("127.0.0.1\tlocalhost\n", asFragment: FragmentID("base"))
+
+        XCTAssertEqual(try store.writer.rename(fragment: FragmentID("base"), to: FragmentID("local")), .wrote)
+
+        XCTAssertEqual(store.layout.remoteSources(), [])
+        XCTAssertEqual(store.entries(), ["fragments/local.hosts"])
+    }
+
+    func testASidecarOutsideTheGrammarIsRefusedAndNothingIsWritten() throws {
+        let store = TemporaryRoot()
+        defer { store.remove() }
+
+        XCTAssertThrowsError(try store.writer.save(remote("https://example.com/hosts.txt"), as: FragmentID("../escape"))) { error in
+            XCTAssertEqual(error as? StoreWriteError, .invalidName("../escape"))
+        }
+        XCTAssertEqual(store.entries(), [])
     }
 }

@@ -1,0 +1,9 @@
+{
+  "etag" : "\"6d8f-1a2b\"",
+  "interval" : 86400,
+  "lastAttempt" : "2026-09-19T04:00:00Z",
+  "lastModified" : "Fri, 19 Sep 2026 04:00:00 GMT",
+  "lastSuccess" : "2026-09-19T04:00:00Z",
+  "url" : "https://someonewhocares.org/hosts/zero/hosts",
+  "version" : 1
+}

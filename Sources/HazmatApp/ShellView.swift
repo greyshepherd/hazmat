@@ -38,7 +38,21 @@ struct ShellView: View {
         .sheet(isPresented: $model.showHelperSheet) {
             HelperSheetView(model: model)
         }
+        .sheet(isPresented: sourceSheetIsPresented) {
+            SourceSheetView(model: model)
+        }
         .modifier(WindowAsks(model: model))
+    }
+
+    /// The source sheet is a value the model holds, so its presence is derived
+    /// from it and a dismissal cancels it.
+    private var sourceSheetIsPresented: Binding<Bool> {
+        Binding(
+            get: { model.sourceSheet != nil },
+            set: { presented in
+                if !presented { model.cancelSourceSheet() }
+            }
+        )
     }
 
     private var columnVisibility: Binding<NavigationSplitViewVisibility> {
@@ -61,6 +75,9 @@ struct ShellView: View {
                 }
                 Button(commands.item("new-fragment")?.title ?? WindowAction.newFragment.title) {
                     model.perform(.newFragment)
+                }
+                Button(commands.item("new-source")?.title ?? WindowAction.newSource.title) {
+                    model.perform(.newSource)
                 }
             } label: {
                 Image(systemName: "plus")

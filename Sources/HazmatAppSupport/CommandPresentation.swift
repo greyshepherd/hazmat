@@ -109,6 +109,7 @@ public struct CommandPresentation: Equatable, Sendable {
             Menu(id: "file", title: "File", items: [
                 item("new-profile", "New Profile", .newProfile, Shortcut("n", .command)),
                 item("new-fragment", "New Fragment", .newFragment, Shortcut("n", [.command, .shift])),
+                item("new-source", "New Source…", .newSource, Shortcut("n", [.command, .option])),
                 item("save", "Save Fragment", .save, Shortcut("s", .command), enabled: hasUnsavedEdit)
             ]),
             Menu(id: "edit", title: "Edit", items: [

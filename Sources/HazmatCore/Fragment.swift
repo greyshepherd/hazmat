@@ -89,6 +89,20 @@ public enum FragmentParser {
             self.fragment = fragment
             self.problems = problems
         }
+
+        /// Whether the text carries a `hazmat:` directive, well formed or not.
+        /// Asked of the parser rather than matched against the text, so the rule
+        /// a fetch enforces is the rule the grammar reads.
+        public var carriesDirective: Bool {
+            if !fragment.removals.isEmpty { return true }
+            return problems.contains { problem in
+                guard case .malformedEntry(_, _, _, let detail) = problem else { return false }
+                switch detail {
+                case .unknownDirective, .malformedRemovalDirective: return true
+                case .missingName, .invalidAddress, .invalidHostName, .duplicateHostName: return false
+                }
+            }
+        }
     }
 
     public static func parse(_ text: String, as id: FragmentID) -> Outcome {

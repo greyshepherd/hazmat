@@ -3,6 +3,10 @@ import HazmatCore
 import XCTest
 @testable import HazmatAppSupport
 
+/// The moment the reads in this file are answered from, so "out of date" is a
+/// value rather than the day the suite happens to run.
+private let readAt = Date(timeIntervalSince1970: 1_760_000_000)
+
 /// The values the panes render: the live file's path, entry and layer counts,
 /// per-layer counts, a fragment's using profiles, and search.
 final class EditorPresentationTests: XCTestCase {
@@ -250,5 +254,241 @@ final class EditorPresentationTests: XCTestCase {
         XCTAssertEqual(presentation.profileRows.map(\.isApplied), [false, true])
         XCTAssertTrue(presentation.isApplied(work))
         XCTAssertFalse(presentation.isApplied(other))
+    }
+
+    // MARK: - A source's origin reaches the reading
+
+    func testASourceWhoseFragmentIsNotThereYetStillHasARowWithItsReason() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        // A first fetch that failed: a sidecar, a reason, and no fragment.
+        try fixture.writeSource(
+            FragmentID("blocklist"),
+            url: "https://example.com/hosts.txt",
+            interval: 6 * 3600,
+            lastAttempt: readAt,
+            lastFailure: "the server answered 503"
+        )
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read(selection: .fragment(FragmentID("blocklist")))
+
+        XCTAssertEqual(presentation.fragments.map(\.rawValue), ["base", "blocklist", "project"])
+        let row = try XCTUnwrap(presentation.fragmentRow(FragmentID("blocklist")))
+        XCTAssertEqual(row.fragment, FragmentID("blocklist"))
+        XCTAssertEqual(row.entryCount, 0, "the store holds no text for it")
+        XCTAssertTrue(row.isRemote)
+        XCTAssertEqual(row.origin?.url, URL(string: "https://example.com/hosts.txt"))
+        XCTAssertEqual(row.origin?.interval, 6 * 3600)
+        XCTAssertEqual(row.origin?.lastSuccess, nil)
+        XCTAssertEqual(row.origin?.failure, "the server answered 503")
+        XCTAssertTrue(row.origin?.isOutOfDate ?? false, "a source that never refreshed is out of date")
+        XCTAssertFalse(row.origin?.isBroken ?? true)
+        XCTAssertEqual(presentation.fragmentText, "", "there is no text to edit yet")
+        XCTAssertEqual(presentation.selectedFragment, FragmentID("blocklist"))
+        XCTAssertTrue(presentation.isRemote(FragmentID("blocklist")))
+    }
+
+    func testAnOrdinaryFragmentHasNoOriginAndASourceCarriesItsRefreshState() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        try fixture.writeSource(
+            base,
+            url: "https://example.com/base.txt",
+            interval: 6 * 3600,
+            lastAttempt: readAt,
+            lastSuccess: readAt
+        )
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read(selection: .fragment(base))
+
+        let remote = try XCTUnwrap(presentation.fragmentRow(base))
+        XCTAssertEqual(remote.origin?.url, URL(string: "https://example.com/base.txt"))
+        XCTAssertEqual(remote.origin?.lastSuccess, readAt)
+        XCTAssertNil(remote.origin?.failure)
+        XCTAssertFalse(remote.origin?.isOutOfDate ?? true, "it refreshed a moment ago")
+        XCTAssertEqual(remote.entryCount, 1, "the text is the fragment's own")
+
+        let ordinary = try XCTUnwrap(presentation.fragmentRow(project))
+        XCTAssertFalse(ordinary.isRemote)
+        XCTAssertNil(ordinary.origin)
+        XCTAssertFalse(presentation.isRemote(project))
+    }
+
+    func testASourceThatIsOutOfDateSaysSoAndOneInsideItsIntervalDoesNot() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        try fixture.writeSource(base, url: "https://example.com/base.txt", interval: 3600, lastAttempt: readAt, lastSuccess: readAt)
+        try fixture.writeSource(
+            project,
+            url: "https://example.com/project.txt",
+            interval: 6 * 3600,
+            lastAttempt: readAt.addingTimeInterval(-7 * 3600),
+            lastSuccess: readAt.addingTimeInterval(-7 * 3600)
+        )
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read(selection: .fragment(base))
+
+        XCTAssertFalse(presentation.origin(of: base)?.isOutOfDate ?? true, "inside its interval")
+        XCTAssertFalse(presentation.origin(of: base)?.isBroken ?? true)
+        XCTAssertTrue(presentation.origin(of: project)?.isOutOfDate ?? false, "the interval has elapsed")
+        XCTAssertFalse(presentation.origin(of: project)?.isBroken ?? true)
+    }
+
+    func testASidecarThatCannotBeReadIsARowWithAReasonAndNoURL() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        try fixture.store.write("{\"version\": 99, \"url\": \"https://example.com/x.txt\", \"interval\": 60}", to: "remote/blocklist.remote")
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read()
+
+        let row = try XCTUnwrap(presentation.fragmentRow(FragmentID("blocklist")))
+        XCTAssertTrue(row.isRemote, "the store holds a sidecar, so it is a source")
+        XCTAssertNil(row.origin?.url)
+        XCTAssertNil(row.origin?.host, "there is no domain to name when the origin cannot be read")
+        XCTAssertTrue(row.origin?.isBroken ?? false)
+        XCTAssertTrue(row.origin?.failure?.contains("99") ?? false, row.origin?.failure ?? "no reason")
+        XCTAssertTrue(row.origin?.isOutOfDate ?? false)
+    }
+
+    func testARemoteFragmentOffersNoSaveButTheRefreshActionAndAnOrdinaryOneTheReverse() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        try fixture.writeSource(base, url: "https://example.com/base.txt", interval: 6 * 3600)
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let remote = model.read(selection: .fragment(base))
+        XCTAssertTrue(remote.actions.contains(.refreshSource(base)), "\(remote.actions)")
+        XCTAssertFalse(
+            remote.actions.contains(.saveFragment(base)),
+            "a remote fragment's text is read-only, because the next refresh replaces it"
+        )
+        XCTAssertTrue(remote.actions.contains(.renameFragment(base)), "renaming carries the origin")
+        XCTAssertTrue(remote.actions.contains(.duplicateFragment(base)), "the copy is an ordinary fragment")
+
+        let ordinary = model.read(selection: .fragment(project))
+        XCTAssertTrue(ordinary.actions.contains(.saveFragment(project)))
+        XCTAssertFalse(ordinary.actions.contains { if case .refreshSource = $0 { return true }; return false })
+    }
+
+    func testTheRowNamesTheDomainWhateverTheURLsShape() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        let cases: [(url: String, host: String)] = [
+            ("https://someonewhocares.org/hosts/zero/hosts", "someonewhocares.org"),
+            ("https://example.com", "example.com"),
+            ("https://www.example.co.uk/a/b?c=d", "www.example.co.uk"),
+            ("https://mirror.example.com:8443/hosts.txt", "mirror.example.com"),
+            ("https://user@example.com/hosts.txt", "example.com")
+        ]
+
+        for (index, entry) in cases.enumerated() {
+            let name = FragmentID("source\(index)")
+            try fixture.writeSource(name, url: entry.url, interval: 6 * 3600)
+            let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+            let origin = try XCTUnwrap(model.read().origin(of: name))
+            XCTAssertEqual(origin.host, entry.host, entry.url)
+            XCTAssertEqual(origin.url?.absoluteString, entry.url, "the whole address is still the origin's")
+        }
+    }
+
+    func testASourceWhoseTextIsNotThereYetOffersTheRefreshAndNoSave() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        try fixture.writeSource(
+            FragmentID("blocklist"),
+            url: "https://example.com/hosts.txt",
+            interval: 6 * 3600,
+            lastFailure: "the server answered 503"
+        )
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read(selection: .fragment(FragmentID("blocklist")))
+
+        XCTAssertTrue(presentation.actions.contains(.refreshSource(FragmentID("blocklist"))))
+        XCTAssertFalse(presentation.actions.contains(.saveFragment(FragmentID("blocklist"))))
+        XCTAssertEqual(presentation.fragmentText, "")
+    }
+
+    func testARowNamesTheURLLastSuccessOutOfDateStateAndFailure() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        // A marked row that refreshed inside its interval.
+        try fixture.writeSource(
+            base,
+            url: "https://example.com/base.txt?mirror=eu",
+            interval: 6 * 3600,
+            lastAttempt: readAt,
+            lastSuccess: readAt
+        )
+        // An out-of-date row.
+        try fixture.writeSource(
+            project,
+            url: "https://example.com/project.txt",
+            interval: 3600,
+            lastAttempt: readAt.addingTimeInterval(-2 * 3600),
+            lastSuccess: readAt.addingTimeInterval(-2 * 3600)
+        )
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read()
+
+        let marked = try XCTUnwrap(presentation.origin(of: base))
+        XCTAssertEqual(marked.url?.absoluteString, "https://example.com/base.txt?mirror=eu")
+        XCTAssertEqual(marked.host, "example.com", "the row names the domain, not the whole address")
+        XCTAssertTrue(marked.state.hasPrefix("Refreshed "), marked.state)
+        XCTAssertFalse(marked.state.contains("Out of date"), marked.state)
+
+        let stale = try XCTUnwrap(presentation.origin(of: project))
+        XCTAssertEqual(stale.url?.absoluteString, "https://example.com/project.txt")
+        XCTAssertTrue(stale.state.contains("Out of date"), stale.state)
+    }
+
+    func testARowReportsTheReasonTheLastRefreshFailed() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        try fixture.writeSource(
+            base,
+            url: "https://example.com/base.txt",
+            interval: 6 * 3600,
+            lastAttempt: readAt,
+            lastSuccess: readAt.addingTimeInterval(-7 * 3600),
+            lastFailure: "the exchange timed out"
+        )
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let origin = try XCTUnwrap(model.read().origin(of: base))
+
+        XCTAssertTrue(origin.state.contains("the exchange timed out"), origin.state)
+        XCTAssertTrue(origin.state.contains("Out of date"), origin.state)
+        XCTAssertEqual(origin.failure, "the exchange timed out")
+    }
+
+    func testASourceThatWasNeverRefreshedSaysSoAndOneInsideItsIntervalDoesNot() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        try fixture.writeSource(base, url: "https://example.com/base.txt", interval: 6 * 3600)
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let origin = try XCTUnwrap(model.read().origin(of: base))
+
+        XCTAssertTrue(origin.state.contains("Never refreshed"), origin.state)
+        XCTAssertTrue(origin.state.contains("Out of date"), origin.state)
+        XCTAssertNil(origin.failure)
+    }
+
+    func testAnEmptyStoreWithNoSourcesReadsAsBefore() throws {
+        let fixture = try twoLayerFixture()
+        defer { fixture.remove() }
+        let model = fixture.model(writer: UnregisteredHelper(), now: { readAt })
+
+        let presentation = model.read()
+
+        XCTAssertEqual(presentation.fragments, [base, project])
+        XCTAssertTrue(presentation.fragmentRows.allSatisfy { !$0.isRemote })
     }
 }

@@ -75,6 +75,10 @@ enum DeleteRequest: Equatable, Sendable {
     var confirmTitle: String { "Delete" }
 }
 
+/// What the system says about the helper's registration. Injectable so a test
+/// can exercise a path that needs the helper without installing one.
+typealias HelperRegistrationState = @Sendable () -> HelperState
+
 /// The store read one read asks for: the window's presentation, and the menu's
 /// derivation when it is wanted. Injectable so a test can decide when a read
 /// lands.
@@ -135,6 +139,8 @@ final class ShellModel {
     var deletion: DeleteRequest?
     var nameDraft = ""
     var showHelperSheet = false
+    /// The add-source or edit-source sheet, when the window is asking.
+    var sourceSheet: SourceSheetPresentation?
     var sidebarVisible = true
     /// Bumped when the search command asks for the field.
     private(set) var searchFocusRequests = 0
@@ -146,6 +152,26 @@ final class ShellModel {
     private var session: StoreSession
     private let registration: HelperRegistration
     private let presence: HelperPresence
+    /// The approval the system reports, read when it is asked rather than
+    /// remembered, so a change made in System Settings is picked up.
+    private let registrationState: HelperRegistrationState
+    /// Where a source is fetched from. The application's own fetcher by default,
+    /// and a script in a test, so the suite never reaches the network.
+    private let fetcher: any RemoteFetching
+    /// The moment the schedule reads. Injectable, so a test can move the clock
+    /// rather than wait for it.
+    private let clock: @Sendable () -> Date
+    /// The repeating due check, held so it can be stopped when the model goes
+    /// away.
+    @ObservationIgnored private nonisolated(unsafe) var remoteTimer: Timer?
+    /// The refreshes asked for and not yet started. A source is in here at most
+    /// once, so a due check that runs again while an exchange is in flight skips
+    /// it rather than queueing it twice.
+    private var refreshQueue: [FragmentID] = []
+    private var refreshesOutstanding: Set<FragmentID> = []
+    /// Whether an exchange is in flight. One at a time, because a refresh plans
+    /// from a presentation the next one would change.
+    private var refreshInFlight = false
     /// The update check, when the bundle declares a feed. A development bundle
     /// passes nothing and is offered no check.
     private let updates: (any UpdateChecking)?
@@ -198,6 +224,9 @@ final class ShellModel {
         updates: (any UpdateChecking)? = nil,
         environment: [String: String] = ProcessInfo.processInfo.environment,
         preference: StoreLocationPreference = DefaultsStoreLocationPreference(),
+        fetcher: (any RemoteFetching)? = nil,
+        clock: @escaping @Sendable () -> Date = { Date() },
+        registrationState: @escaping HelperRegistrationState = { HelperRegistration().state },
         read: StoreRead? = nil
     ) {
         // One client serves both, so the app opens no second path to the helper
@@ -208,6 +237,9 @@ final class ShellModel {
         self.writer = writer
         self.presence = presence ?? client
         self.updates = updates
+        self.fetcher = fetcher ?? URLSessionRemoteFetcher()
+        self.clock = clock
+        self.registrationState = registrationState
         readStore = read ?? Self.storeRead
         updateAvailability = updates?.availability ?? .unavailable
         self.preference = preference
@@ -215,13 +247,14 @@ final class ShellModel {
         let session = StoreSession(
             root: StoreLocation.resolve(environment: environment, chosen: preference.chosenLocation()),
             fileURL: fileURL,
-            writer: writer
+            writer: writer,
+            now: clock
         )
         self.session = session
         registration = HelperRegistration()
         editor = session.editor.read()
         reading = session.catalogue.activation(reading: session.liveFile)
-        helper = registration.state
+        helper = registrationState()
         selection = editor.selection
         adoptFragmentDraft(editor)
         // The first check is asked for here, off the main actor: a helper that
@@ -229,6 +262,7 @@ final class ShellModel {
         // the registration's own word for the seconds its bound takes rather
         // than holding the first frame back for them.
         checkPresence(forced: true)
+        startRemoteSchedule()
         dockObserver = NotificationCenter.default.addObserver(
             forName: NSWindow.willCloseNotification, object: nil, queue: .main
         ) { [weak self] note in
@@ -408,8 +442,9 @@ final class ShellModel {
     /// one. A helper the app has not checked yet keeps the registration's own
     /// word for the moment it takes the check to land.
     private func helperState() -> HelperState {
-        guard let lastAnswer else { return registration.state }
-        return registration.state.refined(by: lastAnswer.answer)
+        let registered = registrationState()
+        guard let lastAnswer else { return registered }
+        return registered.refined(by: lastAnswer.answer)
     }
 
     /// Records what a check found, and reports whether it changed the state.
@@ -520,7 +555,7 @@ final class ShellModel {
     /// The answer arrives on the main actor, so the window is never held up by a
     /// helper that is not there.
     private func checkPresence(forced: Bool = false) {
-        guard registration.state == .enabled else { return }
+        guard registrationState() == .enabled else { return }
         guard !checkInFlight else { return }
         if !forced, let lastAnswer {
             guard lastAnswer.answer == .answering else { return }
@@ -692,6 +727,247 @@ final class ShellModel {
         finish(session.editor.delete(fragment: fragment))
     }
 
+    // MARK: - Sources
+
+    /// The store's sources as they are now, so the window can render a row for
+    /// each and a caller can find one's origin.
+    var remoteSources: [RemoteSourceReading] { session.remoteSources.readings() }
+
+    /// The sources the schedule should fetch now. The answer is read from the
+    /// store rather than remembered, so a sidecar an editor changed is honoured
+    /// on the next tick.
+    private func dueSources() -> [RemoteSourceReading] {
+        session.remoteSources.scheduled(at: clock())
+    }
+
+    /// Starts the schedule: a due check now, and one on a repeating timer. Both
+    /// run regardless of what the window is showing, so a source is refreshed
+    /// whether or not its row is on screen.
+    private func startRemoteSchedule() {
+        refreshDueSources()
+        let timer = Timer.scheduledTimer(withTimeInterval: RemoteSchedule.tick, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.refreshDueSources() }
+        }
+        timer.tolerance = RemoteSchedule.tick / 4
+        remoteTimer = timer
+    }
+
+    /// Asks the store which sources are due and fetches them, one at a time. A
+    /// source already in flight, or already waiting its turn, is skipped rather
+    /// than queued twice.
+    func refreshDueSources() {
+        enqueue(dueSources().map(\.fragment))
+    }
+
+    /// Fetches one source now, whatever its interval says, and whether or not
+    /// its fragment is there yet. A request that cannot take the writer is
+    /// reported rather than silently dropped: the source is left due, and it is
+    /// fetched when it is asked for again.
+    func refreshSource(_ name: FragmentID) {
+        guard enqueue([name]) else {
+            notice = .failure("a write is in flight; '\(name)' is still due — refresh again when it finishes")
+            return
+        }
+    }
+
+    // MARK: - The add-source and edit-source sheets
+
+    /// The sheet's fields, bound by the view. Editing a field clears the store's
+    /// own refusal, so a stale reason never outlives what it was about; the live
+    /// validation takes over as the field is typed.
+    var sourceSheetName: String {
+        get { sourceSheet?.name ?? "" }
+        set { editSheet { $0.name = newValue } }
+    }
+
+    var sourceSheetURL: String {
+        get { sourceSheet?.url ?? "" }
+        set { editSheet { $0.url = newValue } }
+    }
+
+    var sourceSheetHours: Double {
+        get { sourceSheet?.hours ?? SourceSheetPresentation.standardHours }
+        set { editSheet { $0.hours = newValue } }
+    }
+
+    var sourceSheetIsManual: Bool {
+        get { sourceSheet?.isManual ?? false }
+        set { editSheet { $0.isManual = newValue } }
+    }
+
+    private func editSheet(_ change: (inout SourceSheetPresentation) -> Void) {
+        guard var sheet = sourceSheet else { return }
+        sheet.refusal = nil
+        change(&sheet)
+        sourceSheet = sheet
+    }
+
+    /// Opens the sheet that asks for a new source.
+    func beginAddSource() {
+        sourceSheet = SourceSheetPresentation(mode: .adding)
+    }
+
+    /// Opens the sheet for a source the store already holds. A name that is not
+    /// a source is left alone rather than opening a sheet that cannot be saved.
+    func beginEditSource(_ name: FragmentID) {
+        guard let source = session.remoteSources.reading(name)?.source else {
+            notice = .failure("'\(name)' is not a source the store holds")
+            return
+        }
+        sourceSheet = .editing(name, source)
+    }
+
+    func cancelSourceSheet() {
+        sourceSheet = nil
+    }
+
+    /// Records what the sheet describes. A refusal keeps the sheet open with
+    /// everything that was typed, so it is corrected where it was given rather
+    /// than reported after the sheet closes.
+    func commitSourceSheet() {
+        guard let sheet = sourceSheet else { return }
+        if let problem = sheet.validation {
+            sourceSheet = sheet.reporting(problem)
+            return
+        }
+        let outcome: EditorOutcome
+        switch sheet.mode {
+        case .adding:
+            outcome = addSource(named: sheet.name, url: sheet.url, interval: sheet.interval)
+        case .editing(let name):
+            outcome = updateSource(name, url: sheet.url, interval: sheet.interval)
+        }
+        guard outcome.problem == nil, !outcome.needsAttention else {
+            sourceSheet = sheet.reporting(outcome.problem ?? outcome.description)
+            return
+        }
+        sourceSheet = nil
+    }
+
+    /// Records a source and asks for its first fetch, so a source added by name,
+    /// URL, and interval has its text as soon as the exchange lands. Nothing is
+    /// written for a URL that could never be fetched or an interval that could
+    /// never be used: the refusal is returned for the window to report.
+    @discardableResult
+    func addSource(named name: String, url: String, interval: TimeInterval?) -> EditorOutcome {
+        let fragment = FragmentID(name)
+        // A name's own sentence, from the one grammar the store and the window
+        // share, so the field and the store refuse in the same words.
+        if let reason = NameSyntax.refusal(name) {
+            return EditorOutcome(problem: reason)
+        }
+        let parsed: URL
+        switch RemoteRefresher.origin(from: url) {
+        case .success(let url): parsed = url
+        case .failure(let refusal): return EditorOutcome(problem: refusal.reason)
+        }
+        let length = RemoteInterval.length(from: interval)
+        if let reason = RemoteInterval.refusal(for: length) {
+            return EditorOutcome(problem: reason)
+        }
+        guard !busy else {
+            return EditorOutcome(problem: "a write is in flight; try again in a moment")
+        }
+
+        let outcome = session.editor.recordSource(RemoteSource(url: parsed, interval: length), as: fragment)
+        guard outcome.didChangeTheStore else {
+            finish(outcome)
+            return outcome
+        }
+        selection = .fragment(fragment)
+        guard enqueue([fragment]) else {
+            finish(EditorOutcome(store: outcome.store, problem: "a write is in flight, so the first fetch waits"))
+            return outcome
+        }
+        return outcome
+    }
+
+    /// Changes a source's URL and interval, keeping its refresh state. A source
+    /// that is not recorded under `name` is refused rather than invented.
+    @discardableResult
+    func updateSource(_ name: FragmentID, url: String, interval: TimeInterval?) -> EditorOutcome {
+        guard let existing = session.remoteSources.reading(name)?.source else {
+            return EditorOutcome(problem: "'\(name)' is not a source the store holds")
+        }
+        let parsed: URL
+        switch RemoteRefresher.origin(from: url) {
+        case .success(let url): parsed = url
+        case .failure(let refusal): return EditorOutcome(problem: refusal.reason)
+        }
+        let length = RemoteInterval.length(from: interval)
+        if let reason = RemoteInterval.refusal(for: length) {
+            return EditorOutcome(problem: reason)
+        }
+
+        var updated = existing
+        updated.url = parsed
+        updated.interval = length
+        let outcome = session.editor.recordSource(updated, as: name)
+        finish(outcome)
+        return outcome
+    }
+
+    /// Adds the names to the refresh queue, skipping the ones already there.
+    ///
+    /// A write in flight takes the one-writer gate an edit takes, so a refresh
+    /// asked for while one runs is left due rather than run concurrently: its
+    /// sidecar still says it is due, and the next tick finds it again.
+    @discardableResult
+    private func enqueue(_ names: [FragmentID]) -> Bool {
+        // A refresh may wait its turn behind another refresh — they run one at a
+        // time, in the order they were asked for — but never behind an edit or an
+        // apply, which plan from a presentation a concurrent refresh would
+        // change. A request that cannot take that gate is left due.
+        guard !busy || refreshInFlight else { return false }
+        for name in names where !refreshesOutstanding.contains(name) {
+            refreshesOutstanding.insert(name)
+            refreshQueue.append(name)
+        }
+        runNextRefresh()
+        return true
+    }
+
+    /// Starts the next queued refresh, if one is waiting and nothing else holds
+    /// the writer. One exchange at a time, off the main actor: the window keeps
+    /// taking selections and keystrokes while an exchange is in flight, and
+    /// adopts the result when it lands.
+    private func runNextRefresh() {
+        guard !refreshInFlight, !busy, !refreshQueue.isEmpty else { return }
+        let name = refreshQueue.removeFirst()
+
+        guard let source = session.remoteSources.reading(name)?.source else {
+            // A source whose sidecar cannot be read is reported, never fetched.
+            let problem = session.remoteSources.reading(name)?.problem ?? "the source record cannot be read"
+            refreshesOutstanding.remove(name)
+            notice = .failure("'\(name)' was not refreshed: \(problem)")
+            runNextRefresh()
+            return
+        }
+
+        let editorModel = session.editor
+        let previous = editor
+        let fetcher = fetcher
+        let at = clock()
+        refreshInFlight = true
+        busy = true
+        notice = .progress("Refreshing \(name)…")
+        Task.detached {
+            let outcome = await editorModel.refresh(
+                fragment: name,
+                source: source,
+                previous: previous,
+                fetcher: fetcher,
+                at: at
+            )
+            await MainActor.run {
+                self.refreshInFlight = false
+                self.refreshesOutstanding.remove(name)
+                self.finish(outcome)
+                self.runNextRefresh()
+            }
+        }
+    }
+
     private var selectedProfile: ProfileID? { editor.selectedProfile }
 
     private var selectedFragment: FragmentID? { editor.selectedFragment }
@@ -702,6 +978,15 @@ final class ShellModel {
     /// re-apply.
     func saveFragment(text: String) {
         guard let fragment = selectedFragment else { return }
+        // A remote fragment's text is the last fetch, so the window presents it
+        // read-only: saving it here would be undone by the next refresh.
+        guard !editor.isRemote(fragment) else {
+            notice = .failure(
+                "'\(fragment)' is fetched from a URL, so its text is replaced by the next refresh. "
+                    + "Edit the file itself to change it."
+            )
+            return
+        }
         let profile = selectedProfile
         edit(working: "Saving \(fragment)…") { editor, previous in
             editor.save(fragment: fragment, text: text, editing: profile, previous: previous)
@@ -996,6 +1281,7 @@ final class ShellModel {
         case .chooseLocation: chooseStoreLocation()
         case .newProfile: beginNameEntry(.newProfile)
         case .newFragment: beginNameEntry(.newFragment)
+        case .newSource: beginAddSource()
         case .apply: requestApply()
         case .revert: requestRevert()
         case .overwriteDrift: requestOverwriteDrift()
@@ -1069,6 +1355,9 @@ final class ShellModel {
         }
         if let keyWindowObserver {
             NotificationCenter.default.removeObserver(keyWindowObserver)
+        }
+        if let remoteTimer {
+            remoteTimer.invalidate()
         }
     }
 }

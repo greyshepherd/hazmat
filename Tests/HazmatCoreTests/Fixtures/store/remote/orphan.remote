@@ -1,0 +1,7 @@
+{
+  "interval" : 0,
+  "lastAttempt" : "2026-09-19T04:00:00Z",
+  "lastFailure" : "the source record's fragment is not in the store",
+  "url" : "https://example.invalid/hosts.txt",
+  "version" : 1
+}

@@ -72,7 +72,7 @@ final class CommandPresentationTests: XCTestCase {
         // not offered is part of the set being checked.
         let actions = Set(commands(fixture, update: .available).menus.flatMap(\.items).map(\.action))
         let expected: Set<WindowAction> = [
-            .createStore, .chooseLocation, .newProfile, .newFragment, .apply,
+            .createStore, .chooseLocation, .newProfile, .newFragment, .newSource, .apply,
             .removeBlock, .reload, .save, .installHelper, .repairHelper,
             .revealHostsFile, .toggleSidebar, .search, .showHelp, .checkForUpdates
         ]
@@ -87,6 +87,7 @@ final class CommandPresentationTests: XCTestCase {
 
         XCTAssertEqual(commands.item("new-profile")?.shortcut?.display, "⌘N")
         XCTAssertEqual(commands.item("new-fragment")?.shortcut?.display, "⇧⌘N")
+        XCTAssertEqual(commands.item("new-source")?.shortcut?.display, "⌥⌘N")
         XCTAssertEqual(commands.item("reload")?.shortcut?.display, "⌘R")
         XCTAssertEqual(commands.item("apply")?.shortcut?.display, "⌘⏎")
         XCTAssertEqual(commands.item("search")?.shortcut?.display, "⌘F")

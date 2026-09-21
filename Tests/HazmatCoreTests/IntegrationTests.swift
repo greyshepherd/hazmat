@@ -31,8 +31,11 @@ final class IntegrationTests: XCTestCase {
         XCTAssertEqualBytes(try BlockSplice.strip(from: spliced), original)
         XCTAssertEqualBytes(try Data(contentsOf: workspace.root.appendingPathComponent("fragments/base.hosts")), fragmentBefore)
 
+        // The store's own three directories and nothing else: fragments,
+        // profiles, and the sidecars recording where a fetched fragment comes
+        // from.
         let entries = try FileManager.default.contentsOfDirectory(atPath: workspace.root.path).sorted()
-        XCTAssertEqual(entries, ["fragments", "profiles"])
+        XCTAssertEqual(entries, ["fragments", "profiles", "remote"])
     }
 
     func testTheSuiteLeavesEtcHostsUntouched() throws {

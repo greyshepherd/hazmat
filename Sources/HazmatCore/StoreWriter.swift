@@ -31,7 +31,7 @@ public enum StoreWriteError: Error, Equatable, Sendable, CustomStringConvertible
     public var description: String {
         switch self {
         case .invalidName(let name):
-            return "'\(name)' is not a usable name. \(NameSyntax.requirement)"
+            return "'\(name)' is not a usable name. \(NameSyntax.refusal(name) ?? NameSyntax.requirement)"
         case .nameTaken(let name):
             return "the store already holds '\(name)'"
         case .missing(let name):
@@ -63,6 +63,42 @@ public struct StoreWriter: Sendable {
         try save(text, as: .fragment(name))
     }
 
+    /// Creates or replaces the source `name`'s sidecar. The fragment is written
+    /// by its own call, so a sidecar can be recorded for a fragment whose first
+    /// fetch has not landed yet.
+    @discardableResult
+    public func save(_ source: RemoteSource, as name: FragmentID) throws -> StoreWrite {
+        try save(try source.encoded(), asRemote: name)
+    }
+
+    /// Creates or replaces the sidecar `name`, or reports that it already held
+    /// these bytes.
+    @discardableResult
+    public func save(_ contents: Data, asRemote name: FragmentID) throws -> StoreWrite {
+        guard name.isValid else { throw StoreWriteError.invalidName(name.rawValue) }
+        let url = layout.remoteURL(name)
+        if let existing = try? Data(contentsOf: url), existing == contents {
+            return .unchanged
+        }
+        try write(contents, to: url)
+        return .wrote
+    }
+
+    /// Removes the source `name`'s sidecar. A store that holds none reports
+    /// nothing to do, so a caller may ask without knowing.
+    @discardableResult
+    public func deleteRemoteSource(_ name: FragmentID) throws -> StoreWrite {
+        guard name.isValid else { throw StoreWriteError.invalidName(name.rawValue) }
+        let url = layout.remoteURL(name)
+        guard FileManager.default.fileExists(atPath: url.path) else { return .nothingToDo }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            throw StoreWriteError.failed("removing \(url.path): \(error)")
+        }
+        return .deleted
+    }
+
     /// Copies the fragment `name` to `copy`, refusing a name the store holds.
     @discardableResult
     public func duplicate(fragment name: FragmentID, as copy: FragmentID) throws -> StoreWrite {
@@ -71,19 +107,35 @@ public struct StoreWriter: Sendable {
 
     /// Moves the fragment `name` to `newName`, keeping its bytes, and carries
     /// every profile reference to it, so no profile is left naming a fragment
-    /// the store no longer holds.
+    /// the store no longer holds. A fragment that records an origin carries its
+    /// sidecar, so the source's URL and refresh state follow the text.
     @discardableResult
     public func rename(fragment name: FragmentID, to newName: FragmentID) throws -> StoreWrite {
+        try check(.fragment(newName))
+        guard name != newName else { return .nothingToDo }
+        // A name a sidecar already holds is a source, even when its fragment is
+        // not there yet, so renaming onto it is refused rather than clobbering
+        // the other source's origin.
+        guard !FileManager.default.fileExists(atPath: layout.remoteURL(newName).path) else {
+            throw StoreWriteError.nameTaken(newName.rawValue)
+        }
         let moved = try move(.fragment(name), to: .fragment(newName))
         guard moved == .wrote else { return moved }
+        try carrySidecar(from: name, to: newName)
         try carryReferences(from: name, to: newName)
         return moved
     }
 
     /// Removes the fragment `name`, reporting nothing to do when it is absent.
+    /// A sidecar under that name goes with it, and a sidecar whose fragment is
+    /// not there at all is still removed and still reported as a change, so a
+    /// source whose first fetch failed can be removed.
     @discardableResult
     public func delete(fragment name: FragmentID) throws -> StoreWrite {
-        try delete(.fragment(name))
+        let removed = try delete(.fragment(name))
+        let sidecar = try deleteRemoteSource(name)
+        guard sidecar == .deleted else { return removed }
+        return removed == .nothingToDo ? .deleted : removed
     }
 
     // MARK: Profiles
@@ -192,12 +244,25 @@ public struct StoreWriter: Sendable {
         return .wrote
     }
 
+    /// Moves a source's sidecar to the fragment's new name, so an origin is
+    /// never left naming a fragment the store no longer holds. A fragment with
+    /// no sidecar carries nothing.
+    private func carrySidecar(from old: FragmentID, to new: FragmentID) throws {
+        let from = layout.remoteURL(old)
+        guard FileManager.default.fileExists(atPath: from.path) else { return }
+        let to = layout.remoteURL(new)
+        do {
+            try FileManager.default.moveItem(at: from, to: to)
+        } catch {
+            throw StoreWriteError.failed("renaming \(from.path): \(error)")
+        }
+    }
+
     /// Writes every profile line that named `old` as `new`, so a rename leaves
     /// no profile naming a fragment that is gone. A profile is replaced only
     /// when its text changed, and one that cannot be read is reported rather
     /// than passed over.
-    private func carryReferences(from old: FragmentID, to new: FragmentID) throws {
-        for profile in layout.profiles() {
+    private func carryReferences(from old: FragmentID, to new: FragmentID) throws {        for profile in layout.profiles() {
             let url = layout.profileURL(profile)
             let text: String
             do {

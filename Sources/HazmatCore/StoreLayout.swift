@@ -65,6 +65,12 @@ public struct StoreLayout: Equatable, Sendable {
         root.appendingPathComponent("profiles", isDirectory: true)
     }
 
+    /// One sidecar per source: where a fragment fetched from a URL records the
+    /// URL it comes from and the state of its last refresh.
+    public var remoteDirectory: URL {
+        root.appendingPathComponent("remote", isDirectory: true)
+    }
+
     /// Whether the store has been created at all: either of its two directories
     /// is there. A store whose first file was a fragment holds no `profiles/`
     /// yet, and it is still a store the window reads and edits.
@@ -78,6 +84,15 @@ public struct StoreLayout: Equatable, Sendable {
         fragmentsDirectory
             .appendingPathComponent(name.rawValue)
             .appendingPathExtension("hosts")
+    }
+
+    /// The sidecar recording where the fragment `name` is fetched from. The
+    /// sidecar is named after its fragment, so a source and its text move
+    /// together.
+    public func remoteURL(_ name: FragmentID) -> URL {
+        remoteDirectory
+            .appendingPathComponent(name.rawValue)
+            .appendingPathExtension("remote")
     }
 
     public func profileURL(_ name: ProfileID) -> URL {
@@ -94,6 +109,14 @@ public struct StoreLayout: Equatable, Sendable {
     /// The profiles the directory holds now, in name order.
     public func profiles() -> [ProfileID] {
         names(in: profilesDirectory, fileExtension: "profile").map(ProfileID.init)
+    }
+
+    /// The sources the store holds now, in name order: every sidecar whose name
+    /// is a usable one, whether or not its fragment is there yet. A source whose
+    /// first fetch failed holds a sidecar and no fragment, and it is still a
+    /// source the window lists.
+    public func remoteSources() -> [FragmentID] {
+        names(in: remoteDirectory, fileExtension: "remote").map(FragmentID.init)
     }
 
     /// Every file of this kind whose name is a usable identifier, sorted, so two

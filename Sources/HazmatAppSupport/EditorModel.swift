@@ -11,15 +11,21 @@ public struct EditorOutcome: Equatable, Sendable {
     public let apply: ApplyOutcome?
     /// A refusal taken before the store was touched.
     public let problem: String?
+    /// What a refresh did, when this outcome is a refresh's. A refresh is an
+    /// edit, so its store answer and its apply are above; this is the part only
+    /// a refresh has: the exchange, its outcome, and the source's new state.
+    public let refresh: RemoteRefresh?
 
     public init(
         store: Result<StoreWrite, StoreWriteError>? = nil,
         apply: ApplyOutcome? = nil,
-        problem: String? = nil
+        problem: String? = nil,
+        refresh: RemoteRefresh? = nil
     ) {
         self.store = store
         self.apply = apply
         self.problem = problem
+        self.refresh = refresh
     }
 
     /// Whether the store is different afterwards.
@@ -38,11 +44,14 @@ public struct EditorOutcome: Equatable, Sendable {
             case .nothingToDo, .applied: break
             }
         }
-        return problem != nil
+        return problem != nil || refresh?.wasRefused == true
     }
 
     public var description: String {
         var parts: [String] = []
+        if let refresh {
+            parts.append(refresh.description)
+        }
         switch store {
         case .success(let write):
             parts.append(Self.describe(write))
@@ -81,12 +90,22 @@ public struct EditorModel: Sendable {
     /// What a read may reuse across reads. `nil` reads everything from scratch,
     /// which is what a test that wants no reuse passes.
     public let cache: StoreCache?
+    /// The moment a read is answered from, so "out of date" is decided once, in
+    /// one place, rather than wherever a row is rendered.
+    public let now: @Sendable () -> Date
 
-    public init(storeRoot: URL, fileURL: URL, writer: PrivilegedWriter, cache: StoreCache? = nil) {
+    public init(
+        storeRoot: URL,
+        fileURL: URL,
+        writer: PrivilegedWriter,
+        cache: StoreCache? = nil,
+        now: @escaping @Sendable () -> Date = { Date() }
+    ) {
         layout = StoreLayout(root: storeRoot)
         self.fileURL = fileURL
         self.writer = writer
         self.cache = cache
+        self.now = now
     }
 
     private var store: DirectoryStore { DirectoryStore(root: layout.root) }
@@ -106,7 +125,12 @@ public struct EditorModel: Sendable {
     ) -> EditorPresentation {
         let reading = StoreReading(layout: layout, cache: cache)
         let profiles = reading.profiles
-        let fragments = reading.fragments
+        let sources = RemoteSourceCatalogue(layout: layout).readings()
+        // The fragments section is the union of the store's fragments and its
+        // sources, so a source whose first fetch failed — a sidecar and no
+        // fragment — still has a row.
+        let fragments = Array(Set(reading.fragments).union(sources.map(\.fragment))).sorted()
+        let at = now()
         let matchingProfiles = search.profiles(profiles)
         let matchingFragments = search.fragments(fragments)
 
@@ -159,7 +183,16 @@ public struct EditorModel: Sendable {
                 )
             },
             fragmentRows: matchingFragments.map { fragment in
-                FragmentRow(fragment: fragment, entryCount: Self.entryCount(of: fragment, in: reading))
+                FragmentRow(
+                    fragment: fragment,
+                    entryCount: Self.entryCount(of: fragment, in: reading),
+                    origin: Self.origin(
+                        of: fragment,
+                        sources: sources,
+                        hasText: reading.fragment(fragment) != nil,
+                        at: at
+                    )
+                )
             },
             selectedProfile: selectedProfile,
             selectedFragment: selectedFragment,
@@ -174,6 +207,7 @@ public struct EditorModel: Sendable {
             entryLines: resolved.composition.map(BlockRenderer.entries) ?? [],
             usingProfiles: selectedFragment.map { Self.profiles(using: $0, in: profiles, reading: reading) } ?? [],
             appliedProfiles: live.appliedProfiles,
+            liveBlock: live.block,
             live: live.state,
             storeProblem: storeProblem,
             actions: Self.actions(
@@ -182,8 +216,10 @@ public struct EditorModel: Sendable {
                 selectedProfile: selectedProfile,
                 selectedFragment: selectedFragment,
                 layers: layers,
-                live: live.state
-            )
+                live: live.state,
+                sources: Set(sources.map(\.fragment))
+            ),
+            fragmentUsers: Self.fragmentUsers(in: profiles, reading: reading)
         )
     }
 
@@ -236,6 +272,24 @@ public struct EditorModel: Sendable {
         reading.fragment(fragment)?.outcome.fragment.entries.count ?? 0
     }
 
+    /// Where the fragment comes from, or `nil` when it is an ordinary fragment.
+    private static func origin(
+        of fragment: FragmentID,
+        sources: [RemoteSourceReading],
+        hasText: Bool,
+        at now: Date
+    ) -> FragmentRow.Origin? {
+        guard let source = sources.first(where: { $0.fragment == fragment }) else { return nil }
+        return FragmentRow.Origin(
+            url: source.url,
+            interval: source.source?.interval,
+            lastAttempt: source.source?.lastAttempt,
+            lastSuccess: source.source?.lastSuccess,
+            failure: source.failure,
+            isOutOfDate: !hasText || source.source.map { RemoteSchedule.isOutOfDate($0, at: now) } == true
+        )
+    }
+
     private static func layerCount(of profile: ProfileID, in reading: StoreReading) -> Int {
         reading.profile(profile)?.outcome.profile.references.count ?? 0
     }
@@ -247,6 +301,20 @@ public struct EditorModel: Sendable {
         }
     }
 
+    /// Which profiles reference each fragment, built once from the same reading
+    /// so a question about any fragment costs no second pass over the profiles.
+    private static func fragmentUsers(in profiles: [ProfileID], reading: StoreReading) -> [FragmentID: [ProfileID]] {
+        var users: [FragmentID: [ProfileID]] = [:]
+        for profile in profiles {
+            guard let parsed = reading.profile(profile) else { continue }
+            var seen: Set<FragmentID> = []
+            for reference in parsed.outcome.profile.references where seen.insert(reference.fragment).inserted {
+                users[reference.fragment, default: []].append(profile)
+            }
+        }
+        return users
+    }
+
     /// The live file read once, classified against the block the selected
     /// profile renders, with the profiles whose block is the live one. One read
     /// answers both, and every profile's rendering comes from the same reading
@@ -256,31 +324,31 @@ public struct EditorModel: Sendable {
         reading: StoreReading,
         rendering: Data?,
         profiles: [ProfileID]
-    ) -> (state: LiveBlockState, appliedProfiles: [ProfileID]) {
+    ) -> (state: LiveBlockState, appliedProfiles: [ProfileID], block: Data?) {
         let live: Data
         do {
             live = try LiveHostsFile(url: fileURL).read()
         } catch {
-            return (.unreadable(reason: "\(error)"), [])
+            return (.unreadable(reason: "\(error)"), [], nil)
         }
 
         let located: ManagedBlockLocation?
         do {
             located = try ManagedBlock.locate(in: live)
         } catch let error as BlockError {
-            return (.refused(error), [])
+            return (.refused(error), [], nil)
         } catch {
-            return (.unreadable(reason: "\(error)"), [])
+            return (.unreadable(reason: "\(error)"), [], nil)
         }
 
-        guard let located else { return (.absent, []) }
+        guard let located else { return (.absent, [], nil) }
         guard located.version == ManagedBlock.version else {
-            return (.refused(.unsupportedVersion(found: located.version, expected: ManagedBlock.version)), [])
+            return (.refused(.unsupportedVersion(found: located.version, expected: ManagedBlock.version)), [], nil)
         }
         let block = Data(live[located.range])
         let applied = profiles.filter { (try? reading.rendering(of: $0)) == block }
-        if let rendering, block == rendering { return (.applied, applied) }
-        return (.drifted(liveBlock: block), applied)
+        if let rendering, block == rendering { return (.applied, applied, block) }
+        return (.drifted(liveBlock: block), applied, block)
     }
 
     private static func actions(
@@ -289,7 +357,8 @@ public struct EditorModel: Sendable {
         selectedProfile: ProfileID?,
         selectedFragment: FragmentID?,
         layers: [FragmentID],
-        live: LiveBlockState
+        live: LiveBlockState,
+        sources: Set<FragmentID>
     ) -> [EditorPresentation.Action] {
         var actions: [EditorPresentation.Action] = [.newProfile, .newFragment]
 
@@ -319,7 +388,14 @@ public struct EditorModel: Sendable {
             actions.append(.renameFragment(selectedFragment))
             actions.append(.duplicateFragment(selectedFragment))
             actions.append(.deleteFragment(selectedFragment))
-            actions.append(.saveFragment(selectedFragment))
+            if sources.contains(selectedFragment) {
+                // A remote fragment's text is the last fetch, so the window
+                // presents it read-only and offers the refresh that replaces it
+                // instead of a save that would be overwritten.
+                actions.append(.refreshSource(selectedFragment))
+            } else {
+                actions.append(.saveFragment(selectedFragment))
+            }
         }
 
         return actions
@@ -374,6 +450,22 @@ public struct EditorModel: Sendable {
         plain { try storeWriter.delete(fragment: fragment) }
     }
 
+    /// Records where the fragment is fetched from, leaving its text alone. A
+    /// source's origin is authored exactly like a fragment, so this needs no
+    /// helper and no privilege; the text follows on the first fetch that
+    /// succeeds.
+    @discardableResult
+    public func recordSource(_ source: RemoteSource, as fragment: FragmentID) -> EditorOutcome {
+        plain { try storeWriter.save(source, as: fragment) }
+    }
+
+    /// Forgets a source's origin. A caller that wants the text gone too deletes
+    /// the fragment, which takes the sidecar with it.
+    @discardableResult
+    public func removeSource(_ fragment: FragmentID) -> EditorOutcome {
+        plain { try storeWriter.deleteRemoteSource(fragment) }
+    }
+
     // MARK: - Edits that can reach the live file
 
     /// Saves the fragment's text, then re-applies the profile when its block is
@@ -393,6 +485,46 @@ public struct EditorModel: Sendable {
         return writing(profile: profile, previous: previous) {
             try storeWriter.save(text, asFragment: fragment)
         }
+    }
+
+    // MARK: - Refreshing a source
+
+    /// Fetches the fragment's source and stores what came back, then re-applies
+    /// the profile whose block is live when that profile stacks the refreshed
+    /// fragment.
+    ///
+    /// A refresh that changed the text is an edit: it goes through the store
+    /// writer and the same re-apply path, with the live block named as the
+    /// replacement, so a live file that moved since the read is reported as
+    /// drift rather than overwritten. A refresh of a fragment no applied profile
+    /// stacks leaves the live file alone.
+    public func refresh(
+        fragment: FragmentID,
+        source: RemoteSource,
+        previous: EditorPresentation,
+        fetcher: any RemoteFetching,
+        at now: Date = Date()
+    ) async -> EditorOutcome {
+        let refresher = RemoteRefresher(layout: layout, writer: storeWriter, fetcher: fetcher)
+        let refresh = await refresher.refresh(fragment: fragment, source: source, at: now)
+
+        guard refresh.didWrite else {
+            return EditorOutcome(store: .success(.unchanged), refresh: refresh)
+        }
+
+        let store: Result<StoreWrite, StoreWriteError> = .success(.wrote)
+        guard let profile = Self.appliedProfile(stacking: fragment, in: previous), let before = previous.liveBlock else {
+            return EditorOutcome(store: store, refresh: refresh)
+        }
+        return applying(profile: profile, replacing: before, store: store, refresh: refresh)
+    }
+
+    /// The live profile that stacks `fragment`, when one does. Every applied
+    /// profile renders the live block, so when one of them stacks the refreshed
+    /// fragment the first is the one to re-apply.
+    private static func appliedProfile(stacking fragment: FragmentID, in previous: EditorPresentation) -> ProfileID? {
+        let users = previous.stacks(fragment)
+        return previous.appliedProfiles.first { users.contains($0) }
     }
 
     @discardableResult
@@ -538,19 +670,34 @@ public struct EditorModel: Sendable {
         guard write == .wrote, previous.isApplied, let before = previous.rendering else {
             return EditorOutcome(store: .success(write))
         }
+        return applying(profile: profile, replacing: before, store: .success(write))
+    }
 
+    /// The apply half of a change that can reach the live file: renders the
+    /// profile again and replaces `before` with it through the privileged write.
+    /// `before` is the block the live file is expected to hold, so the applier's
+    /// own byte-identity check refuses a file that moved and reports drift
+    /// instead of overwriting it.
+    private func applying(
+        profile: ProfileID,
+        replacing before: Data,
+        store: Result<StoreWrite, StoreWriteError>,
+        refresh: RemoteRefresh? = nil
+    ) -> EditorOutcome {
         let block: Data
         do {
             block = try BlockRenderer.render(composer.compose(profile: profile))
         } catch {
             return EditorOutcome(
-                store: .success(write),
-                apply: .failed(reason: "the edited profile cannot be rendered: \(error)")
+                store: store,
+                apply: .failed(reason: "the changed profile cannot be rendered: \(error)"),
+                refresh: refresh
             )
         }
         return EditorOutcome(
-            store: .success(write),
-            apply: applier.apply(block: block, replacement: .block(before))
+            store: store,
+            apply: applier.apply(block: block, replacement: .block(before)),
+            refresh: refresh
         )
     }
 }
