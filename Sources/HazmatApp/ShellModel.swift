@@ -123,6 +123,15 @@ final class ShellModel {
     /// brings the same item back.
     var selection: SidebarSelection?
     var searchText = ""
+    /// How the resolved block is read. The window's, not the pane's, so the
+    /// pane shows what was last chosen and the window can put it back.
+    var resolvedViewMode: ResolvedViewMode = .text
+    /// The identity of the window's panes. A SwiftUI window that closes keeps
+    /// its view tree — the text views and the table of the resolved block with
+    /// it — so a close changes the identity and the scene builds the panes
+    /// afresh when the window shows again. What they showed is still here: the
+    /// selection, the draft and the last read.
+    private(set) var paneGeneration = 0
 
     /// The edited fragment text, so the menu's Save acts on the same draft the
     /// editor shows. The baseline is what the store held when the draft was
@@ -269,6 +278,7 @@ final class ShellModel {
             let closing = (note.object as? NSWindow).map(ObjectIdentifier.init)
             MainActor.assumeIsolated {
                 self?.matchDockPresenceToTheWindows(ignoring: closing)
+                self?.retireThePanes(ifClosing: closing)
             }
         }
         keyWindowObserver = NotificationCenter.default.addObserver(
@@ -300,6 +310,15 @@ final class ShellModel {
     /// The window the shell is shown in, told by the scene that renders it.
     func windowChanged(_ window: NSWindow?) {
         shellWindow = window
+    }
+
+    /// Lets the panes go when the shell window closes: the resolved block goes
+    /// back to text, and the panes take a new identity so what the closed window
+    /// built is released rather than kept for it.
+    private func retireThePanes(ifClosing closing: ObjectIdentifier?) {
+        guard let shellWindow, let closing, ObjectIdentifier(shellWindow) == closing else { return }
+        resolvedViewMode = .text
+        paneGeneration += 1
     }
 
     /// Performs an action that presents something, once there is a window to

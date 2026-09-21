@@ -16,10 +16,15 @@ struct ShellView: View {
         } content: {
             // The layers pane opens at its minimum so the resolved block takes the
             // room, and the divider widens it when a long layer list needs it.
+            // Both panes take their identity from the model, which changes it
+            // when the window closes: a closed window keeps its view tree, and
+            // these two hold the text views and the table of a large block.
             ContentPane(model: model)
+                .id(model.paneGeneration)
                 .navigationSplitViewColumnWidth(min: 200, ideal: 200)
         } detail: {
             DetailPane(model: model)
+                .id(model.paneGeneration)
                 .navigationSplitViewColumnWidth(min: 400, ideal: 600)
         }
         .navigationTitle("Hazmat")

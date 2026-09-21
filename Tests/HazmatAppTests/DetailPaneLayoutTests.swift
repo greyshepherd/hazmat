@@ -31,6 +31,25 @@ final class DetailPaneLayoutTests: XCTestCase {
         }
     }
 
+    /// Table mode is an `NSTableView` with one row per entry line, not a SwiftUI
+    /// `Table` that builds a view per row. The mode is the model's, so the pane
+    /// shows what the window last chose and the window can put it back.
+    func testTableModeShowsTheEntriesInAnNSTableView() throws {
+        let world = try ShellWorld()
+        defer { world.remove() }
+        let model = world.model()
+        model.resolvedViewMode = .table
+
+        let host = NSHostingView(rootView: DetailPane(model: model))
+        host.frame = NSRect(x: 0, y: 0, width: 600, height: 800)
+        host.layoutSubtreeIfNeeded()
+
+        let table = try XCTUnwrap(Self.allSubviews(of: host).compactMap { $0 as? NSTableView }.first, "the block's table")
+        XCTAssertEqual(table.numberOfRows, model.editor.entryCount)
+        XCTAssertGreaterThan(model.editor.entryCount, 0)
+        XCTAssertNil(Self.allSubviews(of: host).first { $0 is NSTextView }, "text mode's view is not built")
+    }
+
     private static func allSubviews(of view: NSView) -> [NSView] {
         [view] + view.subviews.flatMap { allSubviews(of: $0) }
     }

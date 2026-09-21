@@ -19,11 +19,6 @@ enum ResolvedViewMode: String, CaseIterable, Equatable {
 /// that use the selected fragment. It reads and shows; it never writes.
 struct DetailPane: View {
     @Bindable var model: ShellModel
-    @State private var mode: ResolvedViewMode = .text
-    /// The block's rows, built when the presentation changes rather than on
-    /// every look at the pane: a block of a hundred thousand entries is not
-    /// something a body may rebuild.
-    @State private var tableRows: [EntryTableRow] = []
 
     var body: some View {
         let editor: EditorPresentation = model.editor
@@ -62,7 +57,7 @@ struct DetailPane: View {
                 .bold()
                 .foregroundStyle(.primary)
             Spacer()
-            Picker("View", selection: $mode) {
+            Picker("View", selection: $model.resolvedViewMode) {
                 ForEach(ResolvedViewMode.allCases, id: \.self) { mode in
                     Text(mode.title).tag(mode)
                 }
@@ -94,7 +89,7 @@ struct DetailPane: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            switch mode {
+            switch model.resolvedViewMode {
             case .text:
                 blockText(editor)
             case .table:
@@ -119,30 +114,11 @@ struct DetailPane: View {
     }
 
     /// One row per address line: the address, the names on it, and the fragment
-    /// that supplied it.
+    /// that supplied it. An `NSTableView` behind a data source, so the rows on
+    /// screen are the only ones that cost anything.
     private func blockTable(_ editor: EditorPresentation) -> some View {
-        Table(tableRows) {
-            TableColumn("Address") { row in
-                Text(row.entry.address)
-                    .font(.system(.callout, design: .monospaced))
-                    .textSelection(.enabled)
-            }
-            TableColumn("Names") { row in
-                Text(row.entry.names.joined(separator: ", "))
-                    .textSelection(.enabled)
-            }
-            TableColumn("Source") { row in
-                Text("\(row.entry.source.fragment.rawValue):\(row.entry.source.line)")
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .frame(minHeight: 220, maxHeight: .infinity)
-        .onAppear { tableRows = Self.rows(of: editor) }
-        .onChange(of: editor.renderedBlock) { _, _ in tableRows = Self.rows(of: editor) }
-    }
-
-    private static func rows(of editor: EditorPresentation) -> [EntryTableRow] {
-        editor.entryLines.enumerated().map { EntryTableRow(id: $0.offset, entry: $0.element) }
+        EntryTableView(entries: editor.entryLines, rendering: editor.rendering)
+            .frame(minHeight: 220, maxHeight: .infinity)
     }
 
     private func problemRow(_ message: String) -> some View {
@@ -212,12 +188,6 @@ struct DetailPane: View {
             }
         }
     }
-}
-
-/// A table row for one entry line, with an identity the table can diff.
-struct EntryTableRow: Identifiable {
-    let id: Int
-    let entry: BlockEntry
 }
 
 /// The entries a later layer displaced, with both fragments named. Lazy, because
